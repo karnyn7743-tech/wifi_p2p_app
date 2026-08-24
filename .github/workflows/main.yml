@@ -1,10 +1,10 @@
-name: Flutter Build APK
+name: wifi_p2p_app
 
 on:
   push:
     branches:
       - main  # أو اسم الفرع الأساسي لديك مثل master
-
+main.dart
 jobs:
   build:
     runs-on: ubuntu-latest
