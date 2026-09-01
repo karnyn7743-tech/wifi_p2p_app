@@ -4,7 +4,8 @@ import '../services/identity_service.dart';
 import '../services/network_discovery_service.dart';
 import '../services/p2p_socket_server.dart';
 import '../services/contact_service.dart';
-import '../services/audio_helper.dart'; // 🔔 استيراد خدمة الصوت
+import '../services/audio_helper.dart';
+import '../services/background_service.dart'; // ⚡ استيراد خدمة الخلفية
 import 'chat_detail_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -32,11 +33,14 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    // 🔋 1. طلب استثناء البطارية فور فتح الشاشة لتجنب خمول التطبيق بالخلفية
+    // 🔋 1. طلب استثناء البطارية
     disableBatteryOptimization();
 
-    _fetchMyLocalIps().then((_) {
-      _initNetworkServices();
+    // 📡 2. فحص حالة الواي فاي وتحديث خدمة الخلفية والإشعار
+    BackgroundServiceHelper.isWifiActive().then((_) {
+      _fetchMyLocalIps().then((_) {
+        _initNetworkServices();
+      });
     });
   }
 
@@ -57,20 +61,22 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _initNetworkServices() async {
-    // 📞 2. تفعيل السيرفر المحلي وربط النغمات والمكالمات الواردة
+    // 📞 3. تفعيل السيرفر المحلي وربط النغمات والمكالمات الواردة
     await _socketServer.startServer(
       localPort,
       onRequestConnection: (callerId, callerName, socket) async {
         // 🔔 تشغيل نغمة الرنين فور استقبال اتصال
         await SoundHelper.startRingtone();
 
-        // إظهار حوار مكالمة واردة
+        // إظهار حوار مكالمة واردة باسم جهة الاتصال أو المعرف
+        String displayName = await ContactService.getContactName(callerId) ?? callerName;
+
         if (mounted) {
           showDialog(
             context: context,
             barrierDismissible: false,
             builder: (ctx) => AlertDialog(
-              title: Text('مكالمة واردة من $callerName'),
+              title: Text('مكالمة واردة من $displayName'),
               content: const Text('هل تريد الرد على المكالمة؟'),
               actions: [
                 TextButton(
@@ -100,7 +106,7 @@ class _HomeScreenState extends State<HomeScreen> {
       },
     );
 
-    // 🚀 3. بدء اكتشاف الأجهزة بسرعة بث UDP Broadcast
+    // 🚀 4. بدء اكتشاف الأجهزة بسرعة بث UDP Broadcast
     await _discoveryService.startBroadcasting(localPort);
 
     await _discoveryService.startListening((service) async {
@@ -123,7 +129,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (mounted) {
             setState(() {
               _discoveredDevices[resolvedIp] = {
-                'id': deviceName, // المعرف الفريد للجهاز
+                'id': deviceName, // المعرف الفريد للجهاز (deviceId)
                 'port': port,
                 'ip': resolvedIp,
               };
@@ -213,7 +219,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    SoundHelper.stopRingtone(); // إيقاف أي صوت متبقي
+    SoundHelper.stopRingtone();
     _discoveryService.stop();
     _socketServer.stop();
     super.dispose();
