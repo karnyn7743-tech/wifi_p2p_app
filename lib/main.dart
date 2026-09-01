@@ -14,7 +14,7 @@ void main() async {
   // 2. التحقق من حالة تفعيل التطبيق للجهاز أولاً
   bool isActivated = await LicenseService.isAppActivated();
 
-  // 3. تهيئة خدمة الخلفية والإشعارات (ستفحص الواي فاي وتعمل فقط إذا كان مفضلاً ومفعّلاً)
+  // 3. تهيئة خدمة الخلفية والإشعارات
   if (isActivated) {
     await BackgroundServiceHelper.initializeService();
   }
