@@ -1,15 +1,34 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:connectivity_plus/connectivity_plus.dart'; // 📶 لمراقبة حالة الواي فاي
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'p2p_socket_server.dart';
 import 'contact_service.dart';
 
 class BackgroundServiceHelper {
   static final FlutterLocalNotificationsPlugin _notificationsPlugin =
       FlutterLocalNotificationsPlugin();
+
+  /// فحص دقيق لوجود اتصال فعلي بشبكة واي فاي محلياً من خلال عناوين الـ IP
+  static Future<bool> isWifiActive() async {
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLinkLocal: false,
+      );
+      for (var interface in interfaces) {
+        for (var addr in interface.addresses) {
+          if (!addr.isLoopback) {
+            return true;
+          }
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
 
   /// initialize background service and notifications
   static Future<void> initializeService() async {
@@ -38,11 +57,11 @@ class BackgroundServiceHelper {
             AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(channel);
 
-    // 2. إعداد خدمة الخلفية (جعل التغشيل التلقائي متوقفاً ليتم التحكم به حسب الواي فاي)
+    // 2. إعداد خدمة الخلفية
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: onStart,
-        autoStart: false, // ⚡ لن تعمل تلقائياً عند الإقلاع إلا إذا وجد واي فاي
+        autoStart: false, // ⚡ لن تعمل تلقائياً إلا إذا وُجد اتصال واي فاي
         isForegroundMode: true,
         notificationChannelId: 'p2p_call_channel',
         initialNotificationTitle: 'خدمة الاتصال المحلي تعمل',
@@ -56,24 +75,29 @@ class BackgroundServiceHelper {
       ),
     );
 
-    // 📡 3. فحص الواي فاي فور التشغيل ومراقبته باستمرار
+    // 📡 3. فحص ومراقبة الواي فاي
     _setupWifiListener(service);
   }
 
-  /// مراقبة حالة الواي فاي لتشغيل أو إيقاف الخدمة
+  /// مراقبة حالة الواي فاي وتدقيق الاتصال لتشغيل أو إيقاف الخدمة والإشعار
   static void _setupWifiListener(FlutterBackgroundService service) {
-    Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) async {
-      bool isWifi = results.contains(ConnectivityResult.wifi);
-      bool isRunning = await service.isRunning();
-
-      if (isWifi && !isRunning) {
-        // 🟢 متصل بالواي فاي والخدمة متوقفة -> تشغيل الخدمة
-        await service.startService();
-      } else if (!isWifi && isRunning) {
-        // 🔴 غير متصل بالواي فاي والخدمة تعمل -> إيقاف الخدمة فوراً وإخفاء الإشعار
-        service.invoke('stopService');
-      }
+    Connectivity().onConnectivityChanged.listen((_) async {
+      await checkAndToggleService(service);
     });
+  }
+
+  /// دالة التحقق والتأكد من حالة الخدمة
+  static Future<void> checkAndToggleService(FlutterBackgroundService service) async {
+    bool hasWifi = await isWifiActive();
+    bool isRunning = await service.isRunning();
+
+    if (hasWifi && !isRunning) {
+      // 🟢 يوجد واي فاي والخدمة متوقفة -> تشغيل الخدمة والإشعار
+      await service.startService();
+    } else if (!hasWifi && isRunning) {
+      // 🔴 مفصول عن الواي فاي والخدمة تعمل -> إيقاف الخدمة فوراً وإخفاء الإشعار
+      service.invoke('stopService');
+    }
   }
 
   @pragma('vm:entry-point')
@@ -87,13 +111,13 @@ class BackgroundServiceHelper {
     DartPluginRegistrant.ensureInitialized();
 
     final P2PSocketServer socketServer = P2PSocketServer();
-    StreamSubscription<List<ConnectivityResult>>? connectivitySubscription;
 
     // تشغيل سيرفر الستريم والاستماع بالخلفية على المنفذ 4040
     await socketServer.startServer(
       4040,
       onRequestConnection: (callerId, callerName, socket) async {
-        String name = await ContactService.getContactName(callerName) ?? callerName;
+        // البحث عن الاسم باستخدام deviceId
+        String name = await ContactService.getContactName(callerId) ?? callerName;
         showNotification(
           id: 101,
           title: 'مكالمة واردة 📞',
@@ -109,12 +133,15 @@ class BackgroundServiceHelper {
       },
     );
 
-    // مراقبة الواي فاي من داخل الخدمة نفسها للإغلاق الذاتي الفوري عند انقطاع الواي فاي
-    connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
-      if (!results.contains(ConnectivityResult.wifi)) {
+    // 🔄 مؤقت فحص دوري كل 5 ثوان للتحقق المباشر من انقطاع شبكة الواي فاي
+    Timer.periodic(const Duration(seconds: 5), (timer) async {
+      bool active = await isWifiActive();
+      if (!active) {
+        timer.cancel();
         socketServer.stop();
-        connectivitySubscription?.cancel();
-        service.stopSelf();
+        if (service is AndroidServiceInstance) {
+          service.stopSelf();
+        }
       }
     });
 
@@ -130,8 +157,9 @@ class BackgroundServiceHelper {
 
     service.on('stopService').listen((event) {
       socketServer.stop();
-      connectivitySubscription?.cancel();
-      service.stopSelf();
+      if (service is AndroidServiceInstance) {
+        service.stopSelf();
+      }
     });
   }
 
