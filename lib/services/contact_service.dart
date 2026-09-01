@@ -4,15 +4,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ContactService {
   static const String _contactsKey = 'saved_p2p_contacts';
 
-  // 1️⃣ حفظ جهة اتصال جديدة أو تحديثها
-  static Future<void> saveContact(String deviceIdOrIp, String name) async {
+  /// 1️⃣ حفظ جهة اتصال جديدة أو تحديثها باستخدام deviceId حصراً
+  static Future<void> saveContact(String deviceId, String name) async {
     final prefs = await SharedPreferences.getInstance();
     Map<String, String> contacts = await getContacts();
-    contacts[deviceIdOrIp] = name;
+    contacts[deviceId] = name;
     await prefs.setString(_contactsKey, jsonEncode(contacts));
   }
 
-  // 2️⃣ جلب كل جهات الاتصال المحفوظة
+  /// 2️⃣ جلب كل جهات الاتصال المحفوظة
   static Future<Map<String, String>> getContacts() async {
     final prefs = await SharedPreferences.getInstance();
     String? rawData = prefs.getString(_contactsKey);
@@ -27,18 +27,18 @@ class ContactService {
     }
   }
 
-  // 3️⃣ جلب اسم جهة اتصال محددة بناءً على ID أو IP
-  static Future<String?> getContactName(String deviceIdOrIp) async {
+  /// 3️⃣ جلب اسم جهة اتصال محددة بناءً على deviceId
+  static Future<String?> getContactName(String deviceId) async {
     Map<String, String> contacts = await getContacts();
-    return contacts[deviceIdOrIp];
+    return contacts[deviceId];
   }
 
-  // 4️⃣ 🔑 الدالة المفقودة: حذف جهة اتصال
-  static Future<void> deleteContact(String deviceIdOrIp) async {
+  /// 4️⃣ حذف جهة اتصال باستخدام deviceId
+  static Future<void> deleteContact(String deviceId) async {
     final prefs = await SharedPreferences.getInstance();
     Map<String, String> contacts = await getContacts();
-    if (contacts.containsKey(deviceIdOrIp)) {
-      contacts.remove(deviceIdOrIp);
+    if (contacts.containsKey(deviceId)) {
+      contacts.remove(deviceId);
       await prefs.setString(_contactsKey, jsonEncode(contacts));
     }
   }
