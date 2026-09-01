@@ -35,8 +35,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   @override
   void initState() {
     super.initState();
-    // إظهار الرقم (ID) كاسم افتراضي إذا لم يتوفر اسم سابق
-    _displayName = "الرقم ${widget.targetHost}";
+    // إظهار ID الجهاز كاسم افتراضي إذا لم يتوفر اسم سابق
+    _displayName = widget.targetDeviceId;
     _loadSavedContactName();
 
     P2PSocketServer.messageStream.listen((data) {
@@ -45,15 +45,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _loadSavedContactName() async {
-    // جلب الاسم المحفوظ باستخدام الـ Host/IP أو DeviceID
-    String? savedName = await ContactService.getContactName(widget.targetHost);
-    if (savedName == null || savedName.isEmpty) {
-      savedName = await ContactService.getContactName(widget.targetDeviceId);
-    }
+    // جلب الاسم المحفوظ باستخدام DeviceID حصراً
+    String? savedName = await ContactService.getContactName(widget.targetDeviceId);
 
     if (savedName != null && savedName.isNotEmpty) {
       setState(() {
-        _displayName = "$savedName (${widget.targetHost})";
+        _displayName = savedName;
       });
     }
   }
@@ -175,14 +172,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'الرقم (ID): ${widget.targetHost}',
+              'المعرف (ID): ${widget.targetDeviceId}',
               style: const TextStyle(color: Colors.grey, fontSize: 14),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: nameController,
               decoration: const InputDecoration(
-                labelText: 'الاسم المخصص للرقم',
+                labelText: 'الاسم المخصص للجهاز',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -197,11 +194,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             onPressed: () async {
               String newName = nameController.text.trim();
               if (newName.isNotEmpty) {
-                // حفظ الاسم بربطه برقم المعرف (IP/Host) وأيضاً الـ DeviceID
-                await ContactService.saveContact(widget.targetHost, newName);
+                // حفظ الاسم بربطه بالـ DeviceID فقط لضمان عدم التضارب مع تغير الـ IP
                 await ContactService.saveContact(widget.targetDeviceId, newName);
                 setState(() {
-                  _displayName = "$newName (${widget.targetHost})";
+                  _displayName = newName;
                 });
               }
               if (mounted) Navigator.pop(context);
