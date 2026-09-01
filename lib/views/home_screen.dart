@@ -123,7 +123,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (mounted) {
             setState(() {
               _discoveredDevices[resolvedIp] = {
-                'name': deviceName,
+                'id': deviceName, // المعرف الفريد للجهاز
                 'port': port,
                 'ip': resolvedIp,
               };
@@ -175,20 +175,20 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: ListView.builder(
                       itemCount: contacts.length,
                       itemBuilder: (context, index) {
-                        String id = contacts.keys.elementAt(index);
-                        String name = contacts.values.elementAt(index);
+                        String deviceId = contacts.keys.elementAt(index);
+                        String savedName = contacts.values.elementAt(index);
 
                         return ListTile(
                           leading: const CircleAvatar(
                             backgroundColor: Colors.blueAccent,
                             child: Icon(Icons.person, color: Colors.white),
                           ),
-                          title: Text(name),
-                          subtitle: Text('المعرف / IP: $id'),
+                          title: Text(savedName),
+                          subtitle: Text('معرف الجهاز: $deviceId'),
                           trailing: IconButton(
                             icon: const Icon(Icons.delete, color: Colors.redAccent),
                             onPressed: () async {
-                              await ContactService.deleteContact(id);
+                              await ContactService.deleteContact(deviceId);
                               if (mounted) {
                                 Navigator.pop(context);
                                 setState(() {});
@@ -259,19 +259,16 @@ class _HomeScreenState extends State<HomeScreen> {
                     itemBuilder: (context, index) {
                       String targetIp = _discoveredDevices.keys.elementAt(index);
                       var deviceData = _discoveredDevices[targetIp]!;
-                      String deviceName = deviceData['name'];
+                      String deviceId = deviceData['id'];
 
                       return FutureBuilder<String?>(
-                        future: ContactService.getContactName(targetIp).then((ipName) async {
-                          if (ipName != null && ipName.isNotEmpty) return ipName;
-                          return await ContactService.getContactName(deviceName);
-                        }),
+                        future: ContactService.getContactName(deviceId),
                         builder: (context, snapshot) {
                           String displayName = (snapshot.hasData &&
                                   snapshot.data != null &&
                                   snapshot.data!.isNotEmpty)
-                              ? "${snapshot.data!} ($targetIp)"
-                              : "الرقم $targetIp";
+                              ? snapshot.data!
+                              : deviceId;
 
                           return ListTile(
                             leading: const CircleAvatar(
@@ -283,7 +280,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             trailing: IconButton(
                               icon: const Icon(Icons.chat, color: Colors.blue, size: 28),
                               onPressed: () {
-                                _openChatRoom(deviceName, targetIp, deviceData['port']);
+                                _openChatRoom(deviceId, targetIp, deviceData['port']);
                               },
                             ),
                           );
@@ -297,12 +294,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _openChatRoom(String deviceName, String targetIp, int port) {
+  void _openChatRoom(String deviceId, String targetIp, int port) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ChatDetailScreen(
-          targetDeviceId: deviceName,
+          targetDeviceId: deviceId,
           targetHost: targetIp,
           targetPort: port,
         ),
