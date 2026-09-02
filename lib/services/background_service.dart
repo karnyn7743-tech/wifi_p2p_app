@@ -45,8 +45,8 @@ class BackgroundServiceHelper {
 
     // إنشاء قناة إشعارات عالية الأهمية
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
-      'p2p_call_channel', // id
-      'المكالمات والرسائل الواردة', // title
+      'p2p_call_channel',
+      'المكالمات والرسائل الواردة',
       description: 'إشعارات المكالمات والرسائل الواردة في الشبكة المحلية',
       importance: Importance.max,
       playSound: true,
@@ -57,12 +57,12 @@ class BackgroundServiceHelper {
             AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(channel);
 
-    // 2. إعداد خدمة الخلفية
+    // 2. إعداد خدمة الخلفية (تعطيل isForegroundMode المباشر لمنع الإشعار الإجباري)
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: onStart,
-        autoStart: false, // ⚡ لن تعمل تلقائياً إلا إذا وُجد اتصال واي فاي
-        isForegroundMode: true,
+        autoStart: false,
+        isForegroundMode: false, // 🛑 منع إظهار الإشعار عند بداية التهيئة تلقائياً
         notificationChannelId: 'p2p_call_channel',
         initialNotificationTitle: 'خدمة الاتصال المحلي تعمل',
         initialNotificationContent: 'جاري الاستماع للرسائل والمكالمات الواردة...',
@@ -81,6 +81,9 @@ class BackgroundServiceHelper {
 
   /// مراقبة حالة الواي فاي وتدقيق الاتصال لتشغيل أو إيقاف الخدمة والإشعار
   static void _setupWifiListener(FlutterBackgroundService service) {
+    // فحص فوري وقت التهيئة
+    checkAndToggleService(service);
+
     Connectivity().onConnectivityChanged.listen((_) async {
       await checkAndToggleService(service);
     });
@@ -92,10 +95,10 @@ class BackgroundServiceHelper {
     bool isRunning = await service.isRunning();
 
     if (hasWifi && !isRunning) {
-      // 🟢 يوجد واي فاي والخدمة متوقفة -> تشغيل الخدمة والإشعار
+      // 🟢 يوجد واي فاي والخدمة متوقفة -> تشغيل الخدمة
       await service.startService();
     } else if (!hasWifi && isRunning) {
-      // 🔴 مفصول عن الواي فاي والخدمة تعمل -> إيقاف الخدمة فوراً وإخفاء الإشعار
+      // 🔴 مفصول عن الواي فاي والخدمة تعمل -> إيقاف الخدمة وإخفاء الإشعار
       service.invoke('stopService');
     }
   }
@@ -110,13 +113,26 @@ class BackgroundServiceHelper {
   static void onStart(ServiceInstance service) async {
     DartPluginRegistrant.ensureInitialized();
 
+    // ⚡ التأكد الفوري داخل الخيط: إن لم يوجد واي فاي نغلق الخدمة فوراً قبل إظهار أي إشعار
+    bool active = await isWifiActive();
+    if (!active) {
+      if (service is AndroidServiceInstance) {
+        service.stopSelf();
+      }
+      return;
+    }
+
+    // تحويل الخدمة لـ Foreground وإظهار الإشعار فقط بعد ثبوت وجود الواي فاي
+    if (service is AndroidServiceInstance) {
+      service.setAsForegroundService();
+    }
+
     final P2PSocketServer socketServer = P2PSocketServer();
 
     // تشغيل سيرفر الستريم والاستماع بالخلفية على المنفذ 4040
     await socketServer.startServer(
       4040,
       onRequestConnection: (callerId, callerName, socket) async {
-        // البحث عن الاسم باستخدام deviceId
         String name = await ContactService.getContactName(callerId) ?? callerName;
         showNotification(
           id: 101,
@@ -133,10 +149,10 @@ class BackgroundServiceHelper {
       },
     );
 
-    // 🔄 مؤقت فحص دوري كل 5 ثوان للتحقق المباشر من انقطاع شبكة الواي فاي
-    Timer.periodic(const Duration(seconds: 5), (timer) async {
-      bool active = await isWifiActive();
-      if (!active) {
+    // 🔄 فحص دوري حاسم كل 3 ثوانٍ لإغلاق الإشعار فور فصل الواي فاي
+    Timer.periodic(const Duration(seconds: 3), (timer) async {
+      bool isConnected = await isWifiActive();
+      if (!isConnected) {
         timer.cancel();
         socketServer.stop();
         if (service is AndroidServiceInstance) {
@@ -144,16 +160,6 @@ class BackgroundServiceHelper {
         }
       }
     });
-
-    if (service is AndroidServiceInstance) {
-      service.on('setAsForeground').listen((event) {
-        service.setAsForegroundService();
-      });
-
-      service.on('setAsBackground').listen((event) {
-        service.setAsBackgroundService();
-      });
-    }
 
     service.on('stopService').listen((event) {
       socketServer.stop();
