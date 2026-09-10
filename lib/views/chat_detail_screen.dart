@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -5,7 +6,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import '../services/p2p_socket_server.dart';
 import '../services/webrtc_service.dart';
 import '../services/contact_service.dart';
-import '../services/encryption_service.dart'; // 🔐 استيراد خدمة التشفير
+import '../services/encryption_service.dart';
 
 class ChatDetailScreen extends StatefulWidget {
   final String targetDeviceId;
@@ -27,6 +28,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final TextEditingController _msgController = TextEditingController();
   final List<Map<String, String>> _messages = [];
   final WebRTCService _webrtcService = WebRTCService();
+  
+  // ⚡ اشتراك الستريم لمنع التسريب والخلط بين الجلسات
+  StreamSubscription<String>? _messageSubscription;
 
   String _displayName = '';
   bool _inCall = false;
@@ -35,23 +39,26 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   @override
   void initState() {
     super.initState();
-    // إظهار ID الجهاز كاسم افتراضي إذا لم يتوفر اسم سابق
+    // إظهار ID الجهاز كاسم افتراضي
     _displayName = widget.targetDeviceId;
     _loadSavedContactName();
 
-    P2PSocketServer.messageStream.listen((data) {
+    // ربط الستريم مع حفظ المرجع لإغلاقه عند الخروج
+    _messageSubscription = P2PSocketServer.messageStream.listen((data) {
       _handleIncomingData(data);
     });
   }
 
   Future<void> _loadSavedContactName() async {
-    // جلب الاسم المحفوظ باستخدام DeviceID حصراً
-    String? savedName = await ContactService.getContactName(widget.targetDeviceId);
+    // جلب الاسم المحفوظ باستخدام DeviceID حصراً مع إزالة أي مسافات
+    String? savedName = await ContactService.getContactName(widget.targetDeviceId.trim());
 
     if (savedName != null && savedName.isNotEmpty) {
-      setState(() {
-        _displayName = savedName;
-      });
+      if (mounted) {
+        setState(() {
+          _displayName = savedName;
+        });
+      }
     }
   }
 
@@ -65,9 +72,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         String type = decoded['type'];
 
         if (type == 'offer') {
-          // تشغيل نغمة الرنين عند ورود مكالمة
           P2PSocketServer.playRingtone(loop: true);
-
           _showIncomingCallDialog(
             isVideo: decoded['isVideo'] ?? false,
             sdp: decoded['sdp'],
@@ -98,15 +103,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       // 🔓 فك تشفير الرسالة النصية الواردة فور استلامها
       String decryptedText = EncryptionService.decryptText(rawData);
 
-      // تشغيل نغمة التنبيه عند استقبال رسالة
       P2PSocketServer.playRingtone(loop: false);
 
-      setState(() {
-        _messages.add({
-          'sender': _displayName,
-          'text': decryptedText,
+      if (mounted) {
+        setState(() {
+          _messages.add({
+            'sender': _displayName, // يعرض الاسم المحفوظ الخاص بهذه الشاشة حصراً
+            'text': decryptedText,
+          });
         });
-      });
+      }
     }
   }
 
@@ -162,7 +168,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   void _showSaveContactDialog() {
-    TextEditingController nameController = TextEditingController();
+    TextEditingController nameController = TextEditingController(text: _displayName != widget.targetDeviceId ? _displayName : '');
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -194,11 +200,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             onPressed: () async {
               String newName = nameController.text.trim();
               if (newName.isNotEmpty) {
-                // حفظ الاسم بربطه بالـ DeviceID فقط لضمان عدم التضارب مع تغير الـ IP
-                await ContactService.saveContact(widget.targetDeviceId, newName);
-                setState(() {
-                  _displayName = newName;
-                });
+                // حفظ الاسم بربطه بالـ DeviceID بعد التنظيف
+                await ContactService.saveContact(widget.targetDeviceId.trim(), newName);
+                if (mounted) {
+                  setState(() {
+                    _displayName = newName;
+                  });
+                }
               }
               if (mounted) Navigator.pop(context);
             },
@@ -232,14 +240,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final text = _msgController.text.trim();
     if (text.isEmpty) return;
 
-    // 1. عرض الرسالة واضحة بداخل واجهة المستخدم للمرسل
     setState(() {
       _messages.add({'sender': 'me', 'text': text});
     });
 
     _msgController.clear();
 
-    // 2. 🔒 تشفير النص قبل بثه وإرساله عبر الشبكة
     String encryptedText = EncryptionService.encryptText(text);
 
     await P2PSocketServer.sendMessageToHost(
@@ -251,6 +257,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   @override
   void dispose() {
+    // 🛑 إلغاء اشتراك الستريم فور الخروج من الشاشة لمنع تداخل الأسماء مع الشاشات الأخرى
+    _messageSubscription?.cancel();
     P2PSocketServer.stopRingtone();
     _webrtcService.dispose();
     super.dispose();
