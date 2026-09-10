@@ -49,17 +49,19 @@ class P2PSocketServer {
 
           if (message.startsWith("CONNECT_REQUEST")) {
             List<String> parts = message.split("|");
-            String receivedName = parts.length > 1 ? parts[1] : "";
+            // استخراج deviceId والمعرف الأصلي المرسل
+            String callerId = parts.length > 1 ? parts[1].trim() : remoteIp;
+            String originalName = parts.length > 2 ? parts[2].trim() : callerId;
 
-            // 🔍 البحث عن اسم جهة الاتصال المحفوظة استناداً إلى رقم المعرف/الـ IP
-            String? savedName = await ContactService.getContactName(remoteIp);
+            // 🔍 البحث عن اسم جهة الاتصال المحفوظة استناداً إلى رقم المعرف (deviceId) وليس الـ IP
+            String? savedName = await ContactService.getContactName(callerId);
             
-            // 📞 صياغة نص التنبيه المخصص (عرض الاسم المحفوظ إن وجد، وإلا إظهار الرقم/ID)
+            // 📞 صياغة نص التنبيه المخصص
             String displayName = (savedName != null && savedName.isNotEmpty)
-                ? "$savedName ($remoteIp)"
-                : "الرقم $remoteIp";
+                ? savedName
+                : originalName;
 
-            onRequestConnection(remoteIp, displayName, clientSocket);
+            onRequestConnection(callerId, displayName, clientSocket);
           } else if (message == "CONNECT_ACCEPTED") {
             onMessageReceived(remoteIp, "CONNECT_ACCEPTED");
           } else {
@@ -93,8 +95,9 @@ class P2PSocketServer {
     }
   }
 
-  static Future<bool> sendConnectRequest(String host, int port, String myName) async {
-    return await sendMessageToHost(host, port, "CONNECT_REQUEST|$myName");
+  /// إرسال طلب الاتصال مع تمرير الـ deviceId الخاص بك والاسم
+  static Future<bool> sendConnectRequest(String host, int port, String myDeviceId, String myName) async {
+    return await sendMessageToHost(host, port, "CONNECT_REQUEST|$myDeviceId|$myName");
   }
 
   void stop() {
