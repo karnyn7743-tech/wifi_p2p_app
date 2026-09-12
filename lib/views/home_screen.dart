@@ -111,34 +111,29 @@ class _HomeScreenState extends State<HomeScreen> {
     // 🚀 4. بدء اكتشاف الأجهزة بسرعة بث UDP Broadcast
     await _discoveryService.startBroadcasting(localPort);
 
-    await _discoveryService.startListening((service) async {
-      String resolvedIp = service.host ?? '';
+    // ⚡ التعديل الجوهري لتجاوز خطأ البناء: استقبال List والتكرار عليها
+    await _discoveryService.startListening((devicesList) async {
+      if (!mounted) return;
 
-      if (resolvedIp.isNotEmpty) {
-        try {
-          final addresses = await InternetAddress.lookup(resolvedIp);
-          if (addresses.isNotEmpty) {
-            resolvedIp = addresses.first.address;
-          }
-        } catch (_) {}
+      setState(() {
+        _discoveredDevices.clear();
+        for (var service in devicesList) {
+          String resolvedIp = service.host ?? '';
 
-        if (!_myLocalIps.contains(resolvedIp)) {
-          final deviceName = service.name ?? 'جهاز محلي';
-          final port = service.port ?? 4040;
+          if (resolvedIp.isNotEmpty && !_myLocalIps.contains(resolvedIp)) {
+            final deviceName = service.name ?? 'جهاز محلي';
+            final port = service.port ?? 4040;
 
-          await IdentityService.trustDevice(resolvedIp, deviceName);
+            IdentityService.trustDevice(resolvedIp, deviceName);
 
-          if (mounted) {
-            setState(() {
-              _discoveredDevices[resolvedIp] = {
-                'id': deviceName, // المعرف الفريد للجهاز (deviceId)
-                'port': port,
-                'ip': resolvedIp,
-              };
-            });
+            _discoveredDevices[resolvedIp] = {
+              'id': deviceName, // المعرف الفريد للجهاز (deviceId)
+              'port': port,
+              'ip': resolvedIp,
+            };
           }
         }
-      }
+      });
     });
   }
 
