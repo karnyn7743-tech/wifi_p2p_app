@@ -41,69 +41,82 @@ class P2PSocketServer {
     required Function(String senderId, String message) onMessageReceived,
   }) async {
     try {
-      _server = await ServerSocket.bind(InternetAddress.anyIPv4, port);
+      // إغلاق أي سيرفر سابق لتجنب تعارض المنافذ
+      await _server?.close();
+      _server = await ServerSocket.bind(InternetAddress.anyIPv4, port, shared: true);
+      
       _server?.listen((Socket clientSocket) {
-        clientSocket.listen((data) async {
-          String message = utf8.decode(data, allowMalformed: true).trim();
-          String remoteIp = clientSocket.remoteAddress.address;
+        // ضبط خيارات تحسين استجابة الـ Socket
+        clientSocket.setOption(SocketOption.tcpNoDelay, true);
 
-          if (message.startsWith("CONNECT_REQUEST")) {
-            List<String> parts = message.split("|");
-            // استخراج deviceId والمعرف الأصلي المرسل
-            String callerId = parts.length > 1 ? parts[1].trim() : remoteIp;
-            String originalName = parts.length > 2 ? parts[2].trim() : callerId;
+        clientSocket.listen(
+          (data) async {
+            String message = utf8.decode(data, allowMalformed: true).trim();
+            String remoteIp = clientSocket.remoteAddress.address;
 
-            // 🔍 البحث عن اسم جهة الاتصال المحفوظة استناداً إلى رقم المعرف (deviceId) وليس الـ IP
-            String? savedName = await ContactService.getContactName(callerId);
-            
-            // 📞 صياغة نص التنبيه المخصص
-            String displayName = (savedName != null && savedName.isNotEmpty)
-                ? savedName
-                : originalName;
+            if (message.startsWith("CONNECT_REQUEST")) {
+              List<String> parts = message.split("|");
+              String callerId = parts.length > 1 ? parts[1].trim() : remoteIp;
+              String originalName = parts.length > 2 ? parts[2].trim() : callerId;
 
-            onRequestConnection(callerId, displayName, clientSocket);
-          } else if (message == "CONNECT_ACCEPTED") {
-            onMessageReceived(remoteIp, "CONNECT_ACCEPTED");
-          } else {
-            // 🔓 فك التشفير للرسائل العامة أو رسائل المجموعات الواردة قبل إرسالها للواجهة وإشعار الخلفية
-            String processedMsg = message;
-            try {
-              // محاولة فك التشفير أولاً إن كانت تشفيراً فردياً أو مشفرة كلياً
-              processedMsg = EncryptionService.decryptText(message);
-            } catch (_) {
-              // في حال كانت حزمة JSON للمجموعات، نقوم بفك تشفير الحقل الداخلي للمحتوى فقط
+              String? savedName = await ContactService.getContactName(callerId);
+              String displayName = (savedName != null && savedName.isNotEmpty)
+                  ? savedName
+                  : originalName;
+
+              onRequestConnection(callerId, displayName, clientSocket);
+            } else if (message == "CONNECT_ACCEPTED") {
+              onMessageReceived(remoteIp, "CONNECT_ACCEPTED");
+              clientSocket.destroy();
+            } else {
+              String processedMsg = message;
               try {
-                final decoded = jsonDecode(message);
-                if (decoded is Map<String, dynamic> && decoded.containsKey('message')) {
-                  decoded['message'] = EncryptionService.decryptText(decoded['message']);
-                  processedMsg = jsonEncode(decoded);
-                }
-              } catch (_) {}
-            }
+                processedMsg = EncryptionService.decryptText(message);
+              } catch (_) {
+                try {
+                  final decoded = jsonDecode(message);
+                  if (decoded is Map<String, dynamic> && decoded.containsKey('message')) {
+                    decoded['message'] = EncryptionService.decryptText(decoded['message']);
+                    processedMsg = jsonEncode(decoded);
+                  }
+                } catch (_) {}
+              }
 
-            _messageStreamController.add(processedMsg);
-            onMessageReceived(remoteIp, processedMsg);
-          }
-        });
+              _messageStreamController.add(processedMsg);
+              onMessageReceived(remoteIp, processedMsg);
+              clientSocket.destroy();
+            }
+          },
+          onError: (error) {
+            clientSocket.destroy();
+          },
+          onDone: () {
+            clientSocket.destroy();
+          },
+        );
       });
     } catch (e) {
       print("خطأ أثناء تشغيل السيرفر: $e");
     }
   }
 
+  /// إرسال الرسائل عبر Socket مع إدارة سريعة للموارد وزمن استجابة محدد
   static Future<bool> sendMessageToHost(String host, int port, String message) async {
+    Socket? socket;
     try {
-      Socket socket = await Socket.connect(host, port, timeout: const Duration(seconds: 4));
-      
+      // تقليل مهلة الاتصال لـ 2.5 ثانية للتعامل السريع مع تغيرات الشبكة
+      socket = await Socket.connect(host, port, timeout: const Duration(milliseconds: 2500));
+      socket.setOption(SocketOption.tcpNoDelay, true);
+
       List<int> bytes = utf8.encode(message);
       socket.add(bytes);
       
       await socket.flush();
-      await Future.delayed(const Duration(milliseconds: 300));
       await socket.close();
       return true;
     } catch (e) {
       print("خطأ في إرسال البيانات إلى $host: $e");
+      socket?.destroy();
       return false;
     }
   }
@@ -116,5 +129,6 @@ class P2PSocketServer {
   void stop() {
     stopRingtone();
     _server?.close();
+    _server = null;
   }
 }
