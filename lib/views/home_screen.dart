@@ -6,7 +6,9 @@ import '../services/p2p_socket_server.dart';
 import '../services/contact_service.dart';
 import '../services/audio_helper.dart';
 import '../services/background_service.dart'; // ⚡ استيراد خدمة الخلفية
+import '../services/group_service.dart'; // 👥 استيراد خدمة المجموعات
 import 'chat_detail_screen.dart';
+import 'group_chat_screen.dart'; // 👥 استيراد شاشة محادثة المجموعة
 import 'package:permission_handler/permission_handler.dart';
 
 Future<void> disableBatteryOptimization() async {
@@ -217,6 +219,85 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // 👥 دالة إظهار حوار إنشاء مجموعة جديدة
+  void _showCreateGroupDialog() {
+    TextEditingController groupNameController = TextEditingController();
+    List<String> selectedMembers = [];
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('إنشاء مجموعة جديدة'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: groupNameController,
+                  decoration: const InputDecoration(
+                    labelText: 'اسم المجموعة',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text('اختر الأعضاء (الأجهزة المتاحة):',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                SizedBox(
+                  height: 150,
+                  width: double.maxFinite,
+                  child: _discoveredDevices.isEmpty
+                      ? const Center(child: Text('لا توجد أجهزة متصلة بالشبكة حالياً'))
+                      : ListView(
+                          children: _discoveredDevices.entries.map((entry) {
+                            String devId = entry.value['id'];
+                            bool isSelected = selectedMembers.contains(devId);
+                            return CheckboxListTile(
+                              title: Text(devId),
+                              value: isSelected,
+                              onChanged: (val) {
+                                setDialogState(() {
+                                  if (val == true) {
+                                    selectedMembers.add(devId);
+                                  } else {
+                                    selectedMembers.remove(devId);
+                                  }
+                                });
+                              },
+                            );
+                          }).toList(),
+                        ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('إلغاء'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  String name = groupNameController.text.trim();
+                  if (name.isNotEmpty) {
+                    await GroupService.createGroup(name, selectedMembers);
+                    if (mounted) {
+                      Navigator.pop(ctx);
+                      setState(() {});
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('تم إنشاء المجموعة بنجاح')),
+                      );
+                    }
+                  }
+                },
+                child: const Text('إنشاء'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   @override
   void dispose() {
     SoundHelper.stopRingtone();
@@ -232,6 +313,11 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('المستكشف للاتصالات المحلية'),
         centerTitle: true,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.group_add, color: Colors.white),
+            tooltip: 'إنشاء مجموعة جديدة',
+            onPressed: _showCreateGroupDialog,
+          ),
           IconButton(
             icon: const Icon(Icons.contacts, color: Colors.white),
             tooltip: 'جهات الاتصال المحفوظة',
@@ -257,6 +343,73 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
+          // 👥 قسم عرض المجموعات المحفوظة
+          FutureBuilder<List<GroupModel>>(
+            future: GroupService.getGroups(),
+            builder: (context, snapshot) {
+              if (snapshot.hasData && snapshot.data!.isNotEmpty) {
+                List<GroupModel> groups = snapshot.data!;
+                return Container(
+                  color: Colors.grey.shade100,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blueGrey,
+                            fontSize: 13),
+                        child: Text('المجموعات المحلية:'),
+                      ),
+                      SizedBox(
+                        height: 70,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: groups.length,
+                          itemBuilder: (context, index) {
+                            var group = groups[index];
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 6),
+                              child: ActionChip(
+                                avatar: const CircleAvatar(
+                                  backgroundColor: Colors.blue,
+                                  child: Icon(Icons.group, color: Colors.white, size: 16),
+                                ),
+                                label: Text(group.groupName),
+                                onPressed: () {
+                                  // تحويل قائمة الأجهزة إلى خريطة [deviceId : IP]
+                                  Map<String, String> activeIps = {};
+                                  _discoveredDevices.forEach((ip, data) {
+                                    activeIps[data['id']] = ip;
+                                  });
+
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => GroupChatScreen(
+                                        group: group,
+                                        activeDeviceIps: activeIps,
+                                      ),
+                                    ),
+                                  ).then((_) {
+                                    if (mounted) setState(() {});
+                                  });
+                                },
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
+          const Divider(height: 1),
           Expanded(
             child: _discoveredDevices.isEmpty
                 ? const Center(child: Text('جاري البحث عن أجهزة متصلة بالشبكة...'))
