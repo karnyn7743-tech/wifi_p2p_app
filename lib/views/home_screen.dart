@@ -357,11 +357,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       const Padding(
                         padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                        style: TextStyle(
+                        child: Text(
+                          'المجموعات المحلية:',
+                          style: TextStyle(
                             fontWeight: FontWeight.bold,
                             color: Colors.blueGrey,
-                            fontSize: 13),
-                        child: Text('المجموعات المحلية:'),
+                            fontSize: 13,
+                          ),
+                        ),
                       ),
                       SizedBox(
                         height: 70,
