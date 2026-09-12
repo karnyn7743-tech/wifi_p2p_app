@@ -28,7 +28,7 @@ dependencies:
   flutter_local_notifications: ^17.0.0
   
   # ⚡ تحديث حزمة التسجيل لتشمل الإصلاحات الرسمية لمنصات البناء
-  record: ^5.2.0
+  record_android: ^1.2.0
   path_provider: ^2.1.2
 
 flutter:
