@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'encryption_service.dart'; // 🔐 استيراد خدمة التشفير
 import 'contact_service.dart';    // 📖 استيراد خدمة جهات الاتصال
+import 'file_transfer_service.dart'; // 📁 استيراد خدمة نقل الملفات
 
 class P2PSocketServer {
   ServerSocket? _server;
@@ -54,6 +55,26 @@ class P2PSocketServer {
             String message = utf8.decode(data, allowMalformed: true).trim();
             String remoteIp = clientSocket.remoteAddress.address;
 
+            // 📁 1. التعرف المباشر على استقبال الملفات مع استدعاء FileTransferService
+            if (message.startsWith("FILE_HEADER")) {
+              List<String> parts = message.split("|");
+              if (parts.length >= 3) {
+                String fileName = parts[1];
+                int fileSize = int.tryParse(parts[2]) ?? 0;
+
+                await FileTransferService.receiveFile(
+                  clientSocket,
+                  fileName: fileName,
+                  fileSize: fileSize,
+                  onProgress: (progress) {
+                    print("جاري استقبال الملف: ${(progress * 100).toStringAsFixed(0)}%");
+                  },
+                );
+              }
+              return;
+            }
+
+            // 📞 2. طلبات الاتصال والمكالمات
             if (message.startsWith("CONNECT_REQUEST")) {
               List<String> parts = message.split("|");
               String callerId = parts.length > 1 ? parts[1].trim() : remoteIp;
