@@ -27,6 +27,9 @@ dependencies:
   flutter_webrtc: ^0.12.4
   flutter_background_service: ^5.0.0
   flutter_local_notifications: ^17.0.0
+  
+  record: ^5.1.2
+  path_provider: ^2.1.2
 
 flutter:
   uses-material-design: true
