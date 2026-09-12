@@ -10,7 +10,6 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # ... المكتبات الحالية ...
   connectivity_plus: ^6.0.3
 
   # 1. مكتبات الهوية والتشفير والتخزين
@@ -28,13 +27,9 @@ dependencies:
   flutter_background_service: ^5.0.0
   flutter_local_notifications: ^17.0.0
   
-  record: 5.1.2
+  # ⚡ تحديث حزمة التسجيل لتشمل الإصلاحات الرسمية لمنصات البناء
+  record: ^5.2.0
   path_provider: ^2.1.2
-
-# ⚡ إجبار سيرفر البناء على استخدام إصدارات متوافقة لمنع خطأ RecordLinux
-dependency_overrides:
-  record_platform_interface: 1.1.0
-  record_linux: 0.7.0
 
 flutter:
   uses-material-design: true
