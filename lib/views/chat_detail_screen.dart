@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:file_picker/file_picker.dart';
 import '../services/p2p_socket_server.dart';
 import '../services/webrtc_service.dart';
 import '../services/contact_service.dart';
 import '../services/encryption_service.dart';
+import '../services/file_transfer_service.dart';
 
 class ChatDetailScreen extends StatefulWidget {
   final String targetDeviceId;
@@ -35,6 +38,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   String _displayName = '';
   bool _inCall = false;
   bool _isVideoCall = false;
+
+  // 📁 متغيّرات تتبع رفع وإرسال الملفات
+  double _uploadProgress = 0.0;
+  bool _isUploading = false;
 
   @override
   void initState() {
@@ -255,6 +262,56 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
+  /// 📎 3️⃣ دالة اختيار وإرسال الملفات باستخدام FileTransferService
+  Future<void> _pickAndSendFile() async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles();
+
+    if (result != null && result.files.single.path != null) {
+      File selectedFile = File(result.files.single.path!);
+      String fileName = result.files.single.name;
+
+      setState(() {
+        _isUploading = true;
+        _uploadProgress = 0.0;
+      });
+
+      bool success = await FileTransferService.sendFile(
+        targetHost: widget.targetHost,
+        targetPort: widget.targetPort,
+        file: selectedFile,
+        onProgress: (progress) {
+          if (mounted) {
+            setState(() {
+              _uploadProgress = progress;
+            });
+          }
+        },
+      );
+
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+        });
+
+        if (success) {
+          setState(() {
+            _messages.add({
+              'sender': 'me',
+              'text': '📁 تم إرسال الملف: $fileName',
+            });
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('تم إرسال الملف بنجاح!')),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('فشل في إرسال الملف')),
+          );
+        }
+      }
+    }
+  }
+
   @override
   void dispose() {
     // 🛑 إلغاء اشتراك الستريم فور الخروج من الشاشة لمنع تداخل الأسماء مع الشاشات الأخرى
@@ -317,21 +374,48 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               Container(
                 padding: const EdgeInsets.all(8),
                 color: Colors.white,
-                child: Row(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _msgController,
-                        decoration: const InputDecoration(
-                          hintText: 'اكتب رسالتك هنا...',
-                          border: OutlineInputBorder(),
+                    if (_isUploading)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8.0, left: 8.0, right: 8.0),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: LinearProgressIndicator(
+                                value: _uploadProgress,
+                                backgroundColor: Colors.grey.shade300,
+                                valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text("${(_uploadProgress * 100).toStringAsFixed(0)}%"),
+                          ],
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      icon: const Icon(Icons.send, color: Colors.blue),
-                      onPressed: _sendMessage,
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.attach_file, color: Colors.blue),
+                          tooltip: 'إرفاق ملف',
+                          onPressed: _isUploading ? null : _pickAndSendFile,
+                        ),
+                        Expanded(
+                          child: TextField(
+                            controller: _msgController,
+                            decoration: const InputDecoration(
+                              hintText: 'اكتب رسالتك هنا...',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.send, color: Colors.blue),
+                          onPressed: _sendMessage,
+                        ),
+                      ],
                     ),
                   ],
                 ),
