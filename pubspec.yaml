@@ -23,14 +23,19 @@ dependencies:
   audioplayers: ^6.0.0
   permission_handler: ^11.0.0
 
-  # 3. خدمات الخلفية والشبكة والاتصال (تم تحديث الإصدارات هنا لتوافق إصدارات فلاتر الجديدة)
+  # 3. خدمات الخلفية والشبكة والاتصال
   flutter_webrtc: ^0.12.4
   flutter_background_service: ^5.0.0
   flutter_local_notifications: ^17.0.0
   
-  record: 5.1.2 # تم إزالة علامة ^ لثبيت التوافق ومنع استدعاء حزم محطمة
+  record: 5.1.2
   path_provider: ^2.1.2
-  
+
+# ⚡ إجبار سيرفر البناء على استخدام إصدارات متوافقة لمنع خطأ RecordLinux
+dependency_overrides:
+  record_platform_interface: 1.1.0
+  record_linux: 0.7.0
+
 flutter:
   uses-material-design: true
 
