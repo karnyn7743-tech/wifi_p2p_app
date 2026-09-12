@@ -47,8 +47,16 @@ class WebRTCService {
     await initializeRenderers();
     await createPeerConnectionConfig(targetHost, targetPort);
 
+    // ⚡ خيارات الوسائط المحسنة لإلغاء الصدى وتصفية الضوضاء
     Map<String, dynamic> mediaConstraints = {
-      'audio': true,
+      'audio': {
+        'echoCancellation': true,
+        'noiseSuppression': true,
+        'autoGainControl': true,
+        'sampleRate': 44100,
+        'sampleSize': 16,
+        'channelCount': 1,
+      },
       'video': isVideo ? {'facingMode': 'user', 'width': 640, 'height': 480} : false,
     };
 
@@ -76,8 +84,16 @@ class WebRTCService {
     await initializeRenderers();
     await createPeerConnectionConfig(targetHost, targetPort);
 
+    // ⚡ خيارات الوسائط المحسنة لإلغاء الصدى وتصفية الضوضاء
     Map<String, dynamic> mediaConstraints = {
-      'audio': true,
+      'audio': {
+        'echoCancellation': true,
+        'noiseSuppression': true,
+        'autoGainControl': true,
+        'sampleRate': 44100,
+        'sampleSize': 16,
+        'channelCount': 1,
+      },
       'video': isVideo ? {'facingMode': 'user', 'width': 640, 'height': 480} : false,
     };
 
