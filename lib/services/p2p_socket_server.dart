@@ -65,11 +65,24 @@ class P2PSocketServer {
           } else if (message == "CONNECT_ACCEPTED") {
             onMessageReceived(remoteIp, "CONNECT_ACCEPTED");
           } else {
-            // 🔓 فك التشفير للرسائل العامة الواردة من السيرفر قبل إرسالها للواجهة وإشعار الخلفية
-            String decryptedMsg = EncryptionService.decryptText(message);
+            // 🔓 فك التشفير للرسائل العامة أو رسائل المجموعات الواردة قبل إرسالها للواجهة وإشعار الخلفية
+            String processedMsg = message;
+            try {
+              // محاولة فك التشفير أولاً إن كانت تشفيراً فردياً أو مشفرة كلياً
+              processedMsg = EncryptionService.decryptText(message);
+            } catch (_) {
+              // في حال كانت حزمة JSON للمجموعات، نقوم بفك تشفير الحقل الداخلي للمحتوى فقط
+              try {
+                final decoded = jsonDecode(message);
+                if (decoded is Map<String, dynamic> && decoded.containsKey('message')) {
+                  decoded['message'] = EncryptionService.decryptText(decoded['message']);
+                  processedMsg = jsonEncode(decoded);
+                }
+              } catch (_) {}
+            }
 
-            _messageStreamController.add(decryptedMsg);
-            onMessageReceived(remoteIp, decryptedMsg);
+            _messageStreamController.add(processedMsg);
+            onMessageReceived(remoteIp, processedMsg);
           }
         });
       });
