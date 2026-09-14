@@ -10,9 +10,14 @@ class WebRTCService {
   final RTCVideoRenderer localRenderer = RTCVideoRenderer();
   final RTCVideoRenderer remoteRenderer = RTCVideoRenderer();
 
+  bool _isRenderersInitialized = false;
+
   Future<void> initializeRenderers() async {
-    await localRenderer.initialize();
-    await remoteRenderer.initialize();
+    if (!_isRenderersInitialized) {
+      await localRenderer.initialize();
+      await remoteRenderer.initialize();
+      _isRenderersInitialized = true;
+    }
   }
 
   Future<void> createPeerConnectionConfig(String targetHost, int targetPort) async {
@@ -33,7 +38,7 @@ class WebRTCService {
     };
 
     _peerConnection?.onIceCandidate = (candidate) {
-      if (candidate != null) {
+      if (candidate != null && candidate.candidate != null) {
         final msg = jsonEncode({
           'type': 'candidate',
           'candidate': candidate.toMap(),
@@ -64,7 +69,9 @@ class WebRTCService {
     localRenderer.srcObject = _localStream;
 
     _localStream?.getTracks().forEach((track) {
-      _peerConnection?.addTrack(track, _localStream!);
+      if (_peerConnection != null && _localStream != null) {
+        _peerConnection?.addTrack(track, _localStream!);
+      }
     });
 
     RTCSessionDescription offer = await _peerConnection!.createOffer();
@@ -101,7 +108,9 @@ class WebRTCService {
     localRenderer.srcObject = _localStream;
 
     _localStream?.getTracks().forEach((track) {
-      _peerConnection?.addTrack(track, _localStream!);
+      if (_peerConnection != null && _localStream != null) {
+        _peerConnection?.addTrack(track, _localStream!);
+      }
     });
 
     await _peerConnection!.setRemoteDescription(
@@ -120,18 +129,22 @@ class WebRTCService {
   }
 
   Future<void> handleAnswer(String sdp) async {
-    await _peerConnection?.setRemoteDescription(
-      RTCSessionDescription(sdp, 'answer'),
-    );
+    if (_peerConnection != null) {
+      await _peerConnection?.setRemoteDescription(
+        RTCSessionDescription(sdp, 'answer'),
+      );
+    }
   }
 
   Future<void> handleCandidate(Map<String, dynamic> candidateMap) async {
-    RTCIceCandidate candidate = RTCIceCandidate(
-      candidateMap['candidate'],
-      candidateMap['sdpMid'],
-      candidateMap['sdpMLineIndex'],
-    );
-    await _peerConnection?.addCandidate(candidate);
+    if (_peerConnection != null && candidateMap['candidate'] != null) {
+      RTCIceCandidate candidate = RTCIceCandidate(
+        candidateMap['candidate'],
+        candidateMap['sdpMid'],
+        candidateMap['sdpMLineIndex'],
+      );
+      await _peerConnection?.addCandidate(candidate);
+    }
   }
 
   Future<void> hangup(String targetHost, int targetPort) async {
@@ -143,20 +156,27 @@ class WebRTCService {
   }
 
   Future<void> _closePeerConnection() async {
-    _localStream?.getTracks().forEach((track) => track.stop());
-    await _localStream?.dispose();
-    _localStream = null;
+    try {
+      _localStream?.getTracks().forEach((track) => track.stop());
+      await _localStream?.dispose();
+      _localStream = null;
 
-    localRenderer.srcObject = null;
-    remoteRenderer.srcObject = null;
+      localRenderer.srcObject = null;
+      remoteRenderer.srcObject = null;
 
-    await _peerConnection?.close();
-    _peerConnection = null;
+      await _peerConnection?.close();
+      _peerConnection = null;
+    } catch (e) {
+      print("خطأ أثناء إغلاق PeerConnection: $e");
+    }
   }
 
   Future<void> dispose() async {
     await _closePeerConnection();
-    await localRenderer.dispose();
-    await remoteRenderer.dispose();
+    if (_isRenderersInitialized) {
+      await localRenderer.dispose();
+      await remoteRenderer.dispose();
+      _isRenderersInitialized = false;
+    }
   }
 }
