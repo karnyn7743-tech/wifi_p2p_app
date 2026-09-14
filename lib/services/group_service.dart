@@ -58,6 +58,15 @@ class GroupService {
     }
   }
 
+  /// حذف مجموعة محددة باستخدام معرّف المجموعة (groupId)
+  static Future<void> deleteGroup(String groupId) async {
+    final prefs = await SharedPreferences.getInstance();
+    List<GroupModel> groups = await getGroups();
+
+    groups.removeWhere((g) => g.groupId == groupId);
+    await _saveGroupsList(prefs, groups);
+  }
+
   /// إضافة عضو للمجموعة (بشرط ألا يتجاوز 100 عضو)
   static Future<bool> addMemberToGroup(String groupId, String newDeviceId) async {
     final prefs = await SharedPreferences.getInstance();
