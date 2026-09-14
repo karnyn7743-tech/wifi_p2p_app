@@ -378,37 +378,67 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('المستكشف للاتصالات المحلية'),
         centerTitle: true,
         actions: [
-          // 📞 زر لوحة الأرقام اللاسلكية
-          IconButton(
-            icon: const Icon(Icons.dialpad, color: Colors.white),
-            tooltip: 'لوحة الأرقام اللاسلكية',
-            onPressed: () {
-              List<DiscoveredService> services = _discoveredDevices.entries.map((e) {
-                return DiscoveredService(
-                  name: e.value['id'],
-                  host: e.key,
-                  port: e.value['port'],
-                );
-              }).toList();
+          // 📞 زر لوحة الأرقام اللاسلكية بارز ومبرز بلون واضح
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.green.shade600,
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.dialpad, color: Colors.white, size: 22),
+                tooltip: 'لوحة الأرقام اللاسلكية',
+                onPressed: () {
+                  List<DiscoveredService> services = _discoveredDevices.entries.map((e) {
+                    return DiscoveredService(
+                      name: e.value['id'],
+                      host: e.key,
+                      port: e.value['port'],
+                    );
+                  }).toList();
 
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => DialpadScreen(activeDevices: services),
-                ),
-              );
-            },
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => DialpadScreen(activeDevices: services),
+                    ),
+                  );
+                },
+              ),
+            ),
           ),
-          IconButton(
-            icon: const Icon(Icons.group_add, color: Colors.white),
-            tooltip: 'إنشاء مجموعة جديدة',
-            onPressed: _showCreateGroupDialog,
+          // 👥 زر إنشاء مجموعة جديدة
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.orange.shade700,
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.group_add, color: Colors.white, size: 22),
+                tooltip: 'إنشاء مجموعة جديدة',
+                onPressed: _showCreateGroupDialog,
+              ),
+            ),
           ),
-          IconButton(
-            icon: const Icon(Icons.contacts, color: Colors.white),
-            tooltip: 'جهات الاتصال المحفوظة',
-            onPressed: _showSavedContactsBottomSheet,
+          // 📖 زر جهات الاتصال المحفوظة
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.indigo.shade600,
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.contacts, color: Colors.white, size: 22),
+                tooltip: 'جهات الاتصال المحفوظة',
+                onPressed: _showSavedContactsBottomSheet,
+              ),
+            ),
           ),
+          const SizedBox(width: 4),
         ],
       ),
       body: Column(
