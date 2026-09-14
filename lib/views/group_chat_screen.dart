@@ -143,6 +143,37 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     );
   }
 
+  /// نافذة حوار لتأكيد حذف المجموعة
+  void _showDeleteGroupDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('حذف المجموعة'),
+        content: const Text('هل أنت تأكد من رغبتك في حذف هذه المجموعة؟ لن تتمكن من استعادة بياناتها.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إلغاء'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              await GroupService.deleteGroup(widget.group.groupId);
+              if (mounted) {
+                Navigator.pop(ctx); // إغلاق النافذة
+                Navigator.pop(context); // العودة للشاشة الرئيسية
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('تم حذف المجموعة بنجاح')),
+                );
+              }
+            },
+            child: const Text('حذف', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     int onlineCount = widget.group.memberDeviceIds
@@ -170,6 +201,26 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             ),
             tooltip: 'بث مباشر / مكالمة جماعية (حتى 5 أعضاء)',
             onPressed: _startGroupVideoCall,
+          ),
+          // قائمة الخيارات الإضافية (تتضمن حذف المجموعة)
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'delete') {
+                _showDeleteGroupDialog();
+              }
+            },
+            itemBuilder: (BuildContext context) => [
+              const PopupMenuItem<String>(
+                value: 'delete',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete_forever, color: Colors.red),
+                    SizedBox(width: 8),
+                    Text('حذف المجموعة', style: TextStyle(color: Colors.red)),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
