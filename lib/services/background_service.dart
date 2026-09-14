@@ -62,7 +62,7 @@ class BackgroundServiceHelper {
         channelId: 'p2p_call_channel',
         channelName: 'خدمة اتصالات P2P',
         channelDescription: 'إبقاء اتصال التطبيق نشطاً للاستقبال',
-        channelImportance: NotificationPriority.MAX, // 🛠️ تعديل الخاصية لتتوافق مع الإصدار الحديث
+        channelImportance: NotificationChannelImportance.MAX, // 🛠️ استخدام NotificationChannelImportance
         priority: NotificationPriority.MAX,
       ),
       iosNotificationOptions: const IOSNotificationOptions(
@@ -88,17 +88,19 @@ class BackgroundServiceHelper {
       serviceId: 257,
       notificationTitle: 'الاتصال اللاسلكي محلياً نشط',
       notificationText: 'التطبيق جاهز لاستقبال الاتصالات والرسائل الواردة',
-      notificationIcon: const NotificationIcon(name: 'ic_launcher'), // 🛠️ استبدال icon بـ notificationIcon
+      notificationIcon: const NotificationIcon(
+        metaDataName: 'ic_launcher', // 🛠️ استخدام metaDataName بدلاً من name
+      ),
       callback: startForegroundTaskCallback,
     );
 
-    return result is ServiceRequestSuccess; // 🛠️ تحويل النتيجة إلى bool
+    return result is ServiceRequestSuccess;
   }
 
   /// ⚡ إيقاف خدمة التشغيل المستمر
   static Future<bool> stopForegroundService() async {
     final result = await FlutterForegroundTask.stopService();
-    return result is ServiceRequestSuccess; // 🛠️ تحويل النتيجة إلى bool
+    return result is ServiceRequestSuccess;
   }
 
   /// initialize background service and notifications
