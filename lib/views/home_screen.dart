@@ -5,10 +5,11 @@ import '../services/network_discovery_service.dart';
 import '../services/p2p_socket_server.dart';
 import '../services/contact_service.dart';
 import '../services/audio_helper.dart';
-import '../services/background_service.dart'; // ⚡ استيراد خدمة الخلفية
-import '../services/group_service.dart'; // 👥 استيراد خدمة المجموعات
+import '../services/background_service.dart';
+import '../services/group_service.dart';
 import 'chat_detail_screen.dart';
-import 'group_chat_screen.dart'; // 👥 استيراد شاشة محادثة المجموعة
+import 'group_chat_screen.dart';
+import 'dialpad_screen.dart'; // 📞 استيراد شاشة لوحة الأرقام اللاسلكية
 import 'package:permission_handler/permission_handler.dart';
 
 Future<void> disableBatteryOptimization() async {
@@ -35,10 +36,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    // 🔋 1. طلب استثناء البطارية
     disableBatteryOptimization();
 
-    // 📡 2. فحص حالة الواي فاي وتحديث خدمة الخلفية والإشعار
     BackgroundServiceHelper.isWifiActive().then((_) {
       _fetchMyLocalIps().then((_) {
         _initNetworkServices();
@@ -63,14 +62,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _initNetworkServices() async {
-    // 📞 3. تفعيل السيرفر المحلي وربط النغمات والمكالمات الواردة
     await _socketServer.startServer(
       localPort,
       onRequestConnection: (callerId, callerName, socket) async {
-        // 🔔 تشغيل نغمة الرنين فور استقبال اتصال
         await SoundHelper.startRingtone();
 
-        // إظهار حوار مكالمة واردة باسم جهة الاتصال أو المعرف
         String displayName = await ContactService.getContactName(callerId) ?? callerName;
 
         if (mounted) {
@@ -83,7 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
               actions: [
                 TextButton(
                   onPressed: () {
-                    SoundHelper.stopRingtone(); // إيقاف الرنين عند الرفض
+                    SoundHelper.stopRingtone();
                     Navigator.pop(ctx);
                     socket.destroy();
                   },
@@ -91,7 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 ElevatedButton(
                   onPressed: () {
-                    SoundHelper.stopRingtone(); // إيقاف الرنين عند القبول
+                    SoundHelper.stopRingtone();
                     Navigator.pop(ctx);
                     _openChatRoom(callerId, socket.remoteAddress.address, localPort);
                   },
@@ -103,15 +99,12 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       },
       onMessageReceived: (senderIp, msg) {
-        // 🔔 تشغيل صوت التنبيه فور وصول رسالة جديدة
         SoundHelper.playNotificationSound();
       },
     );
 
-    // 🚀 4. بدء اكتشاف الأجهزة بسرعة بث UDP Broadcast
     await _discoveryService.startBroadcasting(localPort);
 
-    // ⚡ التعديل الجوهري لتجاوز خطأ البناء: استقبال List والتكرار عليها
     await _discoveryService.startListening((devicesList) async {
       if (!mounted) return;
 
@@ -127,7 +120,7 @@ class _HomeScreenState extends State<HomeScreen> {
             IdentityService.trustDevice(resolvedIp, deviceName);
 
             _discoveredDevices[resolvedIp] = {
-              'id': deviceName, // المعرف الفريد للجهاز (deviceId)
+              'id': deviceName,
               'port': port,
               'ip': resolvedIp,
             };
@@ -135,6 +128,65 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       });
     });
+  }
+
+  /// 📞 حوار حفظ / تعديل جهة الاتصال مع إضافة الرقم اللاسلكي المختصر
+  void _showSaveContactDialog(String deviceId, {String currentName = '', String currentExt = ''}) {
+    final nameController = TextEditingController(text: currentName);
+    final extController = TextEditingController(text: currentExt);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('حفظ جهة اتصال'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: 'اسم الجهة',
+                hintText: 'مثال: المكتب الرئيسية',
+                icon: Icon(Icons.person),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: extController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'الرقم اللاسلكي المختصر',
+                hintText: 'مثال: 101',
+                icon: Icon(Icons.dialpad),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إلغاء'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final name = nameController.text.trim();
+              final ext = extController.text.trim();
+              if (name.isNotEmpty) {
+                await ContactService.saveContact(deviceId, name, extension: ext);
+                if (mounted) {
+                  Navigator.pop(ctx);
+                  setState(() {});
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('تم حفظ جهة الاتصال بنجاح')),
+                  );
+                }
+              }
+            },
+            child: const Text('حفظ'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showSavedContactsBottomSheet() {
@@ -145,8 +197,8 @@ class _HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
-        return FutureBuilder<Map<String, String>>(
-          future: ContactService.getContacts(),
+        return FutureBuilder<List<ContactModel>>(
+          future: ContactService.getAllContacts(),
           builder: (context, snapshot) {
             if (!snapshot.hasData) {
               return const SizedBox(
@@ -165,7 +217,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
             return Container(
               padding: const EdgeInsets.all(16),
-              height: 400,
+              height: 450,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -178,28 +230,44 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: ListView.builder(
                       itemCount: contacts.length,
                       itemBuilder: (context, index) {
-                        String deviceId = contacts.keys.elementAt(index);
-                        String savedName = contacts.values.elementAt(index);
+                        final contact = contacts[index];
+                        final extText = contact.extension.isNotEmpty ? ' | الرقم اللاسلكي: ${contact.extension}' : '';
 
                         return ListTile(
                           leading: const CircleAvatar(
                             backgroundColor: Colors.blueAccent,
                             child: Icon(Icons.person, color: Colors.white),
                           ),
-                          title: Text(savedName),
-                          subtitle: Text('معرف الجهاز: $deviceId'),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.redAccent),
-                            onPressed: () async {
-                              await ContactService.deleteContact(deviceId);
-                              if (mounted) {
-                                Navigator.pop(context);
-                                setState(() {});
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('تم حذف جهة الاتصال')),
-                                );
-                              }
-                            },
+                          title: Text(contact.name),
+                          subtitle: Text('معرف: ${contact.deviceId}$extText'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit, color: Colors.blue),
+                                onPressed: () {
+                                  Navigator.pop(context);
+                                  _showSaveContactDialog(
+                                    contact.deviceId,
+                                    currentName: contact.name,
+                                    currentExt: contact.extension,
+                                  );
+                                },
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete, color: Colors.redAccent),
+                                onPressed: () async {
+                                  await ContactService.deleteContact(contact.deviceId);
+                                  if (mounted) {
+                                    Navigator.pop(context);
+                                    setState(() {});
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('تم حذف جهة الاتصال')),
+                                    );
+                                  }
+                                },
+                              ),
+                            ],
                           ),
                         );
                       },
@@ -214,7 +282,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // 👥 دالة إظهار حوار إنشاء مجموعة جديدة
   void _showCreateGroupDialog() {
     TextEditingController groupNameController = TextEditingController();
     List<String> selectedMembers = [];
@@ -308,6 +375,27 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('المستكشف للاتصالات المحلية'),
         centerTitle: true,
         actions: [
+          // 📞 زر لوحة الأرقام اللاسلكية
+          IconButton(
+            icon: const Icon(Icons.dialpad, color: Colors.white),
+            tooltip: 'لوحة الأرقام اللاسلكية',
+            onPressed: () {
+              List<DiscoveredService> services = _discoveredDevices.entries.map((e) {
+                return DiscoveredService(
+                  name: e.value['id'],
+                  host: e.key,
+                  port: e.value['port'],
+                );
+              }).toList();
+
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => DialpadScreen(activeDevices: services),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.group_add, color: Colors.white),
             tooltip: 'إنشاء مجموعة جديدة',
@@ -338,7 +426,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-          // 👥 قسم عرض المجموعات المحفوظة
           FutureBuilder<List<GroupModel>>(
             future: GroupService.getGroups(),
             builder: (context, snapshot) {
@@ -377,7 +464,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                                 label: Text(group.groupName),
                                 onPressed: () {
-                                  // تحويل قائمة الأجهزة إلى خريطة [deviceId : IP]
                                   Map<String, String> activeIps = {};
                                   _discoveredDevices.forEach((ip, data) {
                                     activeIps[data['id']] = ip;
@@ -434,11 +520,21 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             title: Text('$displayName (موثوق)'),
                             subtitle: Text('$targetIp:${deviceData['port']}'),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.chat, color: Colors.blue, size: 28),
-                              onPressed: () {
-                                _openChatRoom(deviceId, targetIp, deviceData['port']);
-                              },
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.bookmark_add, color: Colors.orange),
+                                  tooltip: 'حفظ كجهة اتصال',
+                                  onPressed: () => _showSaveContactDialog(deviceId, currentName: displayName),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.chat, color: Colors.blue, size: 28),
+                                  onPressed: () {
+                                    _openChatRoom(deviceId, targetIp, deviceData['port']);
+                                  },
+                                ),
+                              ],
                             ),
                           );
                         },
