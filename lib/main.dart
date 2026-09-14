@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'services/background_service.dart';
 import 'services/license_service.dart';
@@ -8,15 +9,18 @@ import 'views/home_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // 1. طلب الأذونات المطلوبة
+  // 1. طلب الأذونات المطلوبة بما فيها أذونات الخلفية والإشعارات
   await _requestPermissions();
 
-  // 2. التحقق من حالة تفعيل التطبيق للجهاز أولاً
+  // 2. تهيئة إعدادات خدمة الخلفية (flutter_foreground_task)
+  BackgroundServiceHelper.initService();
+
+  // 3. التحقق من حالة تفعيل التطبيق للجهاز أولاً
   bool isActivated = await LicenseService.isAppActivated();
 
-  // 3. تهيئة خدمة الخلفية والإشعارات
+  // 4. تشغيل خدمة الخلفية والإشعارات في حال كان التطبيق مفعّلاً
   if (isActivated) {
-    await BackgroundServiceHelper.initializeService();
+    await BackgroundServiceHelper.startService();
   }
 
   runApp(WifiP2PApp(isActivated: isActivated));
@@ -28,7 +32,8 @@ Future<void> _requestPermissions() async {
     Permission.camera,
     Permission.location,
     Permission.nearbyWifiDevices,
-    Permission.notification, // طلب إذن الإشعارات لأندرويد 13+
+    Permission.notification, // إذن الإشعارات لأندرويد 13+
+    Permission.ignoreBatteryOptimizations, // طلب استثناء تحسين البطارية لضمان عدم إغلاق السيرفر
   ].request();
 }
 
@@ -52,8 +57,8 @@ class _WifiP2PAppState extends State<WifiP2PApp> {
 
   /// دالة تفعيل التطبيق بعد إدخال الكود الصحيح
   void _handleActivation() async {
-    // ⚡ تهيئة خدمة الخلفية فور إتمام التفعيل بنجاح
-    await BackgroundServiceHelper.initializeService();
+    // ⚡ بدء خدمة الخلفية فور إتمام التفعيل بنجاح
+    await BackgroundServiceHelper.startService();
     if (mounted) {
       setState(() {
         _isActivated = true;
@@ -63,18 +68,20 @@ class _WifiP2PAppState extends State<WifiP2PApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'طالوت الهاشمي للإتصالات المحلية',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        useMaterial3: true,
+    return WithForegroundTask(
+      child: MaterialApp(
+        title: 'المستكشف لإتصالات ألعاب الواي فاي',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          primarySwatch: Colors.blue,
+          useMaterial3: true,
+        ),
+        home: _isActivated
+            ? const HomeScreen()
+            : ActivationView(
+                onActivated: _handleActivation,
+              ),
       ),
-      home: _isActivated
-          ? const HomeScreen()
-          : ActivationView(
-              onActivated: _handleActivation,
-            ),
     );
   }
 }
