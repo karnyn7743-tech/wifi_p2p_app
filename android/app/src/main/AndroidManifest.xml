@@ -71,6 +71,12 @@
             </intent-filter>
         </activity>
         
+        <!-- ⚡ خدمة التشغيل المستمر في الخلفية الخاصة بـ flutter_foreground_task -->
+        <service 
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="connectedDevice|microphone"
+            android:exported="false" />
+
         <!-- تعريف خدمة الخلفية الشاملة للاتصال والصوت -->
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
