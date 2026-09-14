@@ -3,10 +3,35 @@ import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'p2p_socket_server.dart';
 import 'contact_service.dart';
+
+/// معالج المهام المستمرة بالخلفية لمنع خمول المعالج وإبقاء السيرفر نشطاً
+class BackgroundTaskHandler extends TaskHandler {
+  @override
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    await WakelockPlus.enable();
+  }
+
+  @override
+  Future<void> onRepeatEvent(DateTime timestamp) async {
+    // إبقاء الاتصالات والأنشطة حية بالخلفية
+  }
+
+  @override
+  Future<void> onDestroy(DateTime timestamp) async {
+    await WakelockPlus.disable();
+  }
+}
+
+@pragma('vm:entry-point')
+void startForegroundTaskCallback() {
+  FlutterForegroundTask.setTaskHandler(BackgroundTaskHandler());
+}
 
 class BackgroundServiceHelper {
   static final FlutterLocalNotificationsPlugin _notificationsPlugin =
@@ -30,8 +55,53 @@ class BackgroundServiceHelper {
     return false;
   }
 
+  /// ⚡ تهيئة خدمة flutter_foreground_task للإشعارات الدائمة والـ WakeLock
+  static void initService() {
+    FlutterForegroundTask.init(
+      androidNotificationOptions: AndroidNotificationOptions(
+        channelId: 'p2p_call_channel',
+        channelName: 'خدمة اتصالات P2P',
+        channelDescription: 'إبقاء اتصال التطبيق نشطاً للاستقبال',
+        channelImportance: NotificationImportance.MAX,
+        priority: NotificationPriority.MAX,
+      ),
+      iosNotificationOptions: const IOSNotificationOptions(
+        showNotification: true,
+        playSound: false,
+      ),
+      foregroundTaskOptions: ForegroundTaskOptions(
+        eventAction: ForegroundTaskEventAction.repeat(5000),
+        autoRunOnBoot: true,
+        allowWakeLock: true,
+        allowWifiLock: true,
+      ),
+    );
+  }
+
+  /// ⚡ بدء خدمة التشغيل المستمر في الخلفية
+  static Future<bool> startService() async {
+    if (await FlutterForegroundTask.isRunningService) {
+      return true;
+    }
+
+    return await FlutterForegroundTask.startService(
+      serviceId: 257,
+      notificationTitle: 'الاتصال اللاسلكي محلياً نشط',
+      notificationText: 'التطبيق جاهز لاستقبال الاتصالات والرسائل الواردة',
+      icon: null,
+      callback: startForegroundTaskCallback,
+    );
+  }
+
+  /// ⚡ إيقاف خدمة التشغيل المستمر
+  static Future<bool> stopForegroundService() async {
+    return await FlutterForegroundTask.stopService();
+  }
+
   /// initialize background service and notifications
   static Future<void> initializeService() async {
+    initService(); // تهيئة إعدادات المستمر
+
     final service = FlutterBackgroundService();
 
     // 1. تهيئة الإشعارات المحلية
@@ -97,9 +167,11 @@ class BackgroundServiceHelper {
     if (hasWifi && !isRunning) {
       // 🟢 يوجد واي فاي والخدمة متوقفة -> تشغيل الخدمة
       await service.startService();
+      await startService(); // تشغيل الوقاية المستمرة من النوم
     } else if (!hasWifi && isRunning) {
       // 🔴 مفصول عن الواي فاي والخدمة تعمل -> إيقاف الخدمة وإخفاء الإشعار
       service.invoke('stopService');
+      await stopForegroundService();
     }
   }
 
