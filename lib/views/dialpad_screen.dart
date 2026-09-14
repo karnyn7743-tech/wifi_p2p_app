@@ -9,10 +9,10 @@ class DialpadScreen extends StatefulWidget {
   const DialpadScreen({Key? key, required this.activeDevices}) : super(key: key);
 
   @override
-  State<DialpadScreen> createState() => _DialpadScreenState();
+  State<DialpadScreen> createState() => _DialpadScreenState(); // 🛠️ تم تصحيح ربط الـ State
 }
 
-class _ChatDialpadState extends State<DialpadScreen> {
+class _DialpadScreenState extends State<DialpadScreen> { // 🛠️ تم تعديل اسم الكلاس ليتطابق مع createState
   String _enteredNumber = '';
 
   void _onKeyPress(String value) {
@@ -69,8 +69,9 @@ class _ChatDialpadState extends State<DialpadScreen> {
       }
     } else {
       if (mounted) {
+        // 🛠️ تم تصحيح الخطأ واستبدال TextSnackBar بـ SnackBar القياسي
         ScaffoldMessenger.of(context).showSnackBar(
-          TextSnackBar(content: Text('الجهاز (${contact.name}) غير متصل بالشبكة حالياً')),
+          SnackBar(content: Text('الجهاز (${contact.name}) غير متصل بالشبكة حالياً')),
         );
       }
     }
