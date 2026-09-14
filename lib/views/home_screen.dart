@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
 import 'dart:io';
 import '../services/identity_service.dart';
 import '../services/network_discovery_service.dart';
@@ -9,7 +10,7 @@ import '../services/background_service.dart';
 import '../services/group_service.dart';
 import 'chat_detail_screen.dart';
 import 'group_chat_screen.dart';
-import 'dialpad_screen.dart'; // 📞 استيراد شاشة لوحة الأرقام اللاسلكية
+import 'dialpad_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 Future<void> disableBatteryOptimization() async {
@@ -38,7 +39,6 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     disableBatteryOptimization();
 
-    // ⚡ تشغيل خدمة الخلفية المستمرة لضمان بقاء السيرفر واستقبال الاتصالات
     BackgroundServiceHelper.startService();
 
     BackgroundServiceHelper.isWifiActive().then((_) {
@@ -64,6 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// تهيئة خدمات الشبكة ومعالجة الاتصالات الواردة بشكل مباشر وآمن
   Future<void> _initNetworkServices() async {
     await _socketServer.startServer(
       localPort,
@@ -71,6 +72,7 @@ class _HomeScreenState extends State<HomeScreen> {
         await SoundHelper.startRingtone();
 
         String displayName = await ContactService.getContactName(callerId) ?? callerName;
+        String remoteAddress = socket.remoteAddress.address;
 
         if (mounted) {
           showDialog(
@@ -84,6 +86,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: () {
                     SoundHelper.stopRingtone();
                     Navigator.pop(ctx);
+                    
+                    // إرسال إشارة رفض للمتصل وتدمير المقبس بأمان
+                    try {
+                      socket.write(jsonEncode({'type': 'CALL_REJECTED'}));
+                    } catch (_) {}
                     socket.destroy();
                   },
                   child: const Text('رفض', style: TextStyle(color: Colors.red)),
@@ -92,7 +99,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: () {
                     SoundHelper.stopRingtone();
                     Navigator.pop(ctx);
-                    _openChatRoom(callerId, socket.remoteAddress.address, localPort);
+
+                    // 1. إرسال موافقة للمتصل لبدء جلسة الصوت/الفيديو
+                    try {
+                      socket.write(jsonEncode({'type': 'CALL_ACCEPTED'}));
+                    } catch (_) {}
+
+                    // 2. تدمير المقبس المباشر وتوجيه المستخدم لشاشة المحادثة/المكالمة
+                    socket.destroy();
+                    _openChatRoom(callerId, remoteAddress, localPort);
                   },
                   child: const Text('رد'),
                 ),
@@ -133,7 +148,6 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  /// 📞 حوار حفظ / تعديل جهة الاتصال مع إضافة الرقم اللاسلكي المختصر
   void _showSaveContactDialog(String deviceId, {String currentName = '', String currentExt = ''}) {
     final nameController = TextEditingController(text: currentName);
     final extController = TextEditingController(text: currentExt);
@@ -378,7 +392,6 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('المستكشف للاتصالات المحلية'),
         centerTitle: true,
         actions: [
-          // 📞 زر لوحة الأرقام اللاسلكية بارز ومبرز بلون واضح
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
             child: Container(
@@ -408,7 +421,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          // 👥 زر إنشاء مجموعة جديدة
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
             child: Container(
@@ -423,7 +435,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          // 📖 زر جهات الاتصال المحفوظة
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
             child: Container(
