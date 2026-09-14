@@ -36,6 +36,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   StreamSubscription<String>? _messageSubscription;
 
   String _displayName = '';
+  String _displayExtension = '';
   bool _inCall = false;
   bool _isVideoCall = false;
 
@@ -57,16 +58,19 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _loadSavedContactName() async {
-    // جلب الاسم المحفوظ باستخدام DeviceID حصراً مع إزالة أي مسافات
-    String? savedName = await ContactService.getContactName(widget.targetDeviceId.trim());
-
-    if (savedName != null && savedName.isNotEmpty) {
+    // جلب بيانات جهة الاتصال المحفوظة باستخدام DeviceID
+    List<ContactModel> allContacts = await ContactService.getAllContacts();
+    try {
+      final contact = allContacts.firstWhere(
+        (c) => c.deviceId.trim() == widget.targetDeviceId.trim(),
+      );
       if (mounted) {
         setState(() {
-          _displayName = savedName;
+          if (contact.name.isNotEmpty) _displayName = contact.name;
+          _displayExtension = contact.extension;
         });
       }
-    }
+    } catch (_) {}
   }
 
   void _handleIncomingData(String rawData) async {
@@ -174,8 +178,24 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
-  void _showSaveContactDialog() {
-    TextEditingController nameController = TextEditingController(text: _displayName != widget.targetDeviceId ? _displayName : '');
+  void _showSaveContactDialog() async {
+    ContactModel? existingContact;
+    List<ContactModel> allContacts = await ContactService.getAllContacts();
+    try {
+      existingContact = allContacts.firstWhere(
+        (c) => c.deviceId.trim() == widget.targetDeviceId.trim(),
+      );
+    } catch (_) {}
+
+    TextEditingController nameController = TextEditingController(
+      text: existingContact?.name ?? (_displayName != widget.targetDeviceId ? _displayName : ''),
+    );
+    TextEditingController extController = TextEditingController(
+      text: existingContact?.extension ?? _displayExtension,
+    );
+
+    if (!mounted) return;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -196,6 +216,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 border: OutlineInputBorder(),
               ),
             ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: extController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'الرقم اللاسلكي المختصر',
+                hintText: 'مثال: 101',
+                border: OutlineInputBorder(),
+              ),
+            ),
           ],
         ),
         actions: [
@@ -206,14 +236,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           ElevatedButton(
             onPressed: () async {
               String newName = nameController.text.trim();
+              String newExt = extController.text.trim();
               if (newName.isNotEmpty) {
-                // حفظ الاسم بربطه بالـ DeviceID بعد التنظيف
-                await ContactService.saveContact(widget.targetDeviceId.trim(), newName);
-                if (mounted) {
-                  setState(() {
-                    _displayName = newName;
-                  });
-                }
+                // حفظ الاسم والرقم المختصر بربطهما بالـ DeviceID
+                await ContactService.saveContact(
+                  widget.targetDeviceId.trim(),
+                  newName,
+                  extension: newExt,
+                );
+                await _loadSavedContactName();
               }
               if (mounted) Navigator.pop(context);
             },
@@ -325,7 +356,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_displayName),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(_displayName),
+            if (_displayExtension.isNotEmpty)
+              Text(
+                'الرقم اللاسلكي: $_displayExtension',
+                style: const TextStyle(fontSize: 12, color: Colors.white70),
+              ),
+          ],
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.bookmark_add, color: Colors.orange),
