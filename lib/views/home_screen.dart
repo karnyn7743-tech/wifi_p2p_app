@@ -38,6 +38,9 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     disableBatteryOptimization();
 
+    // ⚡ تشغيل خدمة الخلفية المستمرة لضمان بقاء السيرفر واستقبال الاتصالات
+    BackgroundServiceHelper.startService();
+
     BackgroundServiceHelper.isWifiActive().then((_) {
       _fetchMyLocalIps().then((_) {
         _initNetworkServices();
