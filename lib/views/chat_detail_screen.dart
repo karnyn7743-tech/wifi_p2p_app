@@ -32,7 +32,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final List<Map<String, String>> _messages = [];
   final WebRTCService _webrtcService = WebRTCService();
   
-  // ⚡ اشتراك الستريم لمنع التسريب والخلط بين الجلسات
   StreamSubscription<String>? _messageSubscription;
 
   String _displayName = '';
@@ -40,25 +39,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   bool _inCall = false;
   bool _isVideoCall = false;
 
-  // 📁 متغيّرات تتبع رفع وإرسال الملفات
   double _uploadProgress = 0.0;
   bool _isUploading = false;
 
   @override
   void initState() {
     super.initState();
-    // إظهار ID الجهاز كاسم افتراضي
     _displayName = widget.targetDeviceId;
     _loadSavedContactName();
 
-    // ربط الستريم مع حفظ المرجع لإغلاقه عند الخروج
     _messageSubscription = P2PSocketServer.messageStream.listen((data) {
       _handleIncomingData(data);
     });
   }
 
   Future<void> _loadSavedContactName() async {
-    // جلب بيانات جهة الاتصال المحفوظة باستخدام DeviceID
     List<ContactModel> allContacts = await ContactService.getAllContacts();
     try {
       final contact = allContacts.firstWhere(
@@ -97,21 +92,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         } else if (type == 'candidate') {
           await _webrtcService.handleCandidate(decoded['candidate']);
           return;
-        } else if (type == 'hangup') {
+        } else if (type == 'hangup' || type == 'CALL_REJECTED') {
+          // إلغاء الاتصال فور الرفض أو إنهاء المكالمة
           P2PSocketServer.stopRingtone();
-          await _webrtcService.dispose();
-          if (mounted) {
-            setState(() {
-              _inCall = false;
-            });
-          }
+          await _cleanCallSession();
+          return;
+        } else if (type == 'CALL_ACCEPTED') {
+          // استكمال عملية الربط فور موافقة الطرف المستقبل
+          P2PSocketServer.stopRingtone();
+          if (mounted) setState(() {});
           return;
         }
       }
     } catch (_) {}
 
     if (rawData != "CONNECT_ACCEPTED" && rawData.isNotEmpty) {
-      // 🔓 فك تشفير الرسالة النصية الواردة فور استلامها
       String decryptedText = EncryptionService.decryptText(rawData);
 
       P2PSocketServer.playRingtone(loop: false);
@@ -119,11 +114,22 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       if (mounted) {
         setState(() {
           _messages.add({
-            'sender': _displayName, // يعرض الاسم المحفوظ الخاص بهذه الشاشة حصراً
+            'sender': _displayName,
             'text': decryptedText,
           });
         });
       }
+    }
+  }
+
+  /// تنظيف آمن وشامل لجلسة الاتصال السابقة لإتاحة إعادة الاتصال بسهولة
+  Future<void> _cleanCallSession() async {
+    P2PSocketServer.stopRingtone();
+    await _webrtcService.dispose();
+    if (mounted) {
+      setState(() {
+        _inCall = false;
+      });
     }
   }
 
@@ -147,9 +153,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           actions: [
             TextButton(
               onPressed: () async {
-                P2PSocketServer.stopRingtone();
                 Navigator.of(context).pop();
                 await _webrtcService.hangup(widget.targetHost, widget.targetPort);
+                await _cleanCallSession();
               },
               child: const Text('رفض', style: TextStyle(color: Colors.redAccent, fontSize: 18)),
             ),
@@ -158,17 +164,23 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               onPressed: () async {
                 P2PSocketServer.stopRingtone();
                 Navigator.of(context).pop();
+                
+                // 1. إعادة تهيئة الجلسة لضمان استجابة الصوت/الفيديو
+                await _webrtcService.dispose();
+
                 setState(() {
                   _inCall = true;
                   _isVideoCall = isVideo;
                 });
+
+                // 2. إتمام المصافحة بإنشاء الـ Answer
                 await _webrtcService.handleOfferAndAnswer(
                   sdp,
                   widget.targetHost,
                   widget.targetPort,
                   isVideo,
                 );
-                setState(() {});
+                if (mounted) setState(() {});
               },
               child: const Text('رد', style: TextStyle(color: Colors.white, fontSize: 18)),
             ),
@@ -238,7 +250,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               String newName = nameController.text.trim();
               String newExt = extController.text.trim();
               if (newName.isNotEmpty) {
-                // حفظ الاسم والرقم المختصر بربطهما بالـ DeviceID
                 await ContactService.saveContact(
                   widget.targetDeviceId.trim(),
                   newName,
@@ -255,23 +266,22 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
+  /// 📞 التكيف مع تكرار وإعادة إجراء الاتصال بشكل سليم دون تعليق
   void _startCall({required bool isVideo}) async {
+    await _cleanCallSession();
+
     setState(() {
       _inCall = true;
       _isVideoCall = isVideo;
     });
+
     await _webrtcService.makeCall(widget.targetHost, widget.targetPort, isVideo);
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
   void _endCall() async {
-    P2PSocketServer.stopRingtone();
     await _webrtcService.hangup(widget.targetHost, widget.targetPort);
-    if (mounted) {
-      setState(() {
-        _inCall = false;
-      });
-    }
+    await _cleanCallSession();
   }
 
   void _sendMessage() async {
@@ -293,7 +303,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
-  /// 📎 3️⃣ دالة اختيار وإرسال الملفات باستخدام FileTransferService
   Future<void> _pickAndSendFile() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles();
 
@@ -345,7 +354,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   @override
   void dispose() {
-    // 🛑 إلغاء اشتراك الستريم فور الخروج من الشاشة لمنع تداخل الأسماء مع الشاشات الأخرى
     _messageSubscription?.cancel();
     P2PSocketServer.stopRingtone();
     _webrtcService.dispose();
