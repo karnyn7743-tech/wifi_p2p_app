@@ -17,11 +17,11 @@ class ChatDetailScreen extends StatefulWidget {
   final int targetPort;
 
   const ChatDetailScreen({
-    Key? key,
+    key? key,
     required this.targetDeviceId,
     required this.targetHost,
     required this.targetPort,
-  }) : super(Key: key);
+  }) : super(key: key);
 
   @override
   State<ChatDetailScreen> createState() => _ChatDetailScreenState();
