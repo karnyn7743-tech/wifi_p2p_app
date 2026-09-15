@@ -28,11 +28,22 @@ void main() async {
   runApp(WifiP2PApp(isActivated: isActivated));
 }
 
+/// إنشاء كائن من P2PSocketServer لكون الدالة startServer ليست static
+final P2PSocketServer _p2pServerInstance = P2PSocketServer();
+
 /// تشغيل السيرفرات الداخلية وخدمة الخلفية بأمان مستقل لكل خدمة
 Future<void> _startAllServices() async {
   try {
-    // تشغيل سيرفر السوكيت المحلي
-    await P2PSocketServer.startServer();
+    // تشغيل سيرفر الـ P2P وتمرير البورت والـ Callbacks المطلوبة حسب تعريف الكلاس
+    await _p2pServerInstance.startServer(
+      8888,
+      onRequestConnection: (callerId, callerName, socket) {
+        debugPrint('طلب اتصال جديد من: $callerName ($callerId)');
+      },
+      onMessageReceived: (senderId, message) {
+        debugPrint('رسالة جديدة من $senderId: $message');
+      },
+    );
   } catch (e) {
     debugPrint('Error starting P2PSocketServer: $e');
   }
