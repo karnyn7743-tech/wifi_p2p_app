@@ -11,16 +11,16 @@ import 'views/home_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // 1. طلب الأذونات المطلوبة بما فيها أذونات الخلفية والإشعارات والأجهزة المجاورة
+  // 1. طلب الأذونات المطلوبة
   await _requestPermissions();
 
-  // 2. تهيئة خدمات الخلفية والإشعارات المحلية بالكامل
+  // 2. تهيئة خدمات الخلفية والإشعارات المحلية
   await BackgroundServiceHelper.initializeService();
 
-  // 3. التحقق من حالة تفعيل التطبيق للجهاز أولاً
+  // 3. التحقق من حالة تفعيل التطبيق
   bool isActivated = await LicenseService.isAppActivated();
 
-  // 4. تشغيل السيرفرات وخدمة الخلفية في حال كان التطبيق مفعّلاً
+  // 4. تشغيل السيرفرات وخدمة الخلفية عند التفعيل
   if (isActivated) {
     await _startAllServices();
   }
@@ -28,18 +28,28 @@ void main() async {
   runApp(WifiP2PApp(isActivated: isActivated));
 }
 
-/// تشغيل السيرفرات الداخلية وخدمة الخلفية
+/// تشغيل السيرفرات الداخلية وخدمة الخلفية بأمان
 Future<void> _startAllServices() async {
   try {
-    // تشغيل سيرفر الـ Socket اللاسلكي المحلي
+    // ⚡ ملاحظة: تأكد من اسم الدالة في P2PSocketServer (إذا كانت start() أو startServer())
     await P2PSocketServer.startServer();
-    
-    // تشغيل سيرفر التحويلات والمقسم المدمج PBX
+  } catch (e) {
+    debugPrint('Error starting P2PSocketServer: $e');
+  }
+
+  try {
+    // تشغيل سيرفر المقسم المدمج PBX
     await EmbeddedPbxServer.startServer();
-    
+  } catch (e) {
+    debugPrint('Error starting EmbeddedPbxServer: $e');
+  }
+
+  try {
     // تشغيل خدمة المهام في الخلفية والإشعارات
     await BackgroundServiceHelper.startService();
-  } catch (_) {}
+  } catch (e) {
+    debugPrint('Error starting BackgroundService: $e');
+  }
 }
 
 Future<void> _requestPermissions() async {
@@ -48,8 +58,8 @@ Future<void> _requestPermissions() async {
     Permission.camera,
     Permission.location,
     Permission.nearbyWifiDevices,
-    Permission.notification, // إذن الإشعارات لأندرويد 13+
-    Permission.ignoreBatteryOptimizations, // طلب استثناء تحسين البطارية لضمان عدم إغلاق السيرفر
+    Permission.notification,
+    Permission.ignoreBatteryOptimizations,
   ].request();
 }
 
@@ -71,9 +81,7 @@ class _WifiP2PAppState extends State<WifiP2PApp> {
     _isActivated = widget.isActivated;
   }
 
-  /// دالة تفعيل التطبيق بعد إدخال الكود الصحيح
   void _handleActivation() async {
-    // ⚡ بدء تشغيل السيرفرات وخدمة الخلفية فور إتمام التفعيل بنجاح
     await _startAllServices();
     if (mounted) {
       setState(() {
