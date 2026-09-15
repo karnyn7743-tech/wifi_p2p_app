@@ -12,8 +12,8 @@ void main() async {
   // 1. طلب الأذونات المطلوبة بما فيها أذونات الخلفية والإشعارات
   await _requestPermissions();
 
-  // 2. تهيئة إعدادات خدمة الخلفية (flutter_foreground_task)
-  BackgroundServiceHelper.initService();
+  // 2. تهيئة خدمات الخلفية والإشعارات المحلية بالكامل
+  await BackgroundServiceHelper.initializeService();
 
   // 3. التحقق من حالة تفعيل التطبيق للجهاز أولاً
   bool isActivated = await LicenseService.isAppActivated();
