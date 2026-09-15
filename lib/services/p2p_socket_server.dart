@@ -15,6 +15,28 @@ class P2PSocketServer {
   // مشغل الصوت للرنين والتنبيهات
   static final AudioPlayer _audioPlayer = AudioPlayer();
 
+  /// دالة للحصول على الـ IP الحقيقي للجهاز وتخطي الـ Loopback (127.0.0.1)
+  static Future<String> getLocalIpAddress() async {
+    try {
+      final interfaces = await NetworkInterface.list(
+        includeLoopback: false,
+        type: InternetAddressType.IPv4,
+      );
+      
+      for (var interface in interfaces) {
+        // البحث في واجهات الشبكة الفعالة (wlan, ap, eth)
+        for (var addr in interface.addresses) {
+          if (!addr.isLoopback && addr.type == InternetAddressType.IPv4) {
+            return addr.address;
+          }
+        }
+      }
+    } catch (e) {
+      print("خطأ أثناء جلب IP الجهاز: $e");
+    }
+    return "127.0.0.1";
+  }
+
   /// تشغيل صوت نغمة التنبيه للرسائل أو المكالمات
   static Future<void> playRingtone({bool loop = false}) async {
     try {
@@ -36,88 +58,101 @@ class P2PSocketServer {
     } catch (_) {}
   }
 
-  Future<void> startServer(
+  Future<bool> startServer(
     int port, {
     required Function(String callerId, String callerName, Socket socket) onRequestConnection,
     required Function(String senderId, String message) onMessageReceived,
   }) async {
     try {
       // إغلاق أي سيرفر سابق لتجنب تعارض المنافذ
-      await _server?.close();
-      _server = await ServerSocket.bind(InternetAddress.anyIPv4, port, shared: true);
+      await stopServer();
       
-      _server?.listen((Socket clientSocket) {
-        // ضبط خيارات تحسين استجابة الـ Socket
-        clientSocket.setOption(SocketOption.tcpNoDelay, true);
+      // الربط على جميع الواجهات وتفعيل مشاركة المنفذ shared: true
+      _server = await ServerSocket.bind(
+        InternetAddress.anyIPv4, 
+        port, 
+        shared: true,
+      );
+      
+      _server?.listen(
+        (Socket clientSocket) {
+          // ضبط خيارات تحسين استجابة الـ Socket
+          clientSocket.setOption(SocketOption.tcpNoDelay, true);
 
-        clientSocket.listen(
-          (data) async {
-            String message = utf8.decode(data, allowMalformed: true).trim();
-            String remoteIp = clientSocket.remoteAddress.address;
+          clientSocket.listen(
+            (data) async {
+              String message = utf8.decode(data, allowMalformed: true).trim();
+              String remoteIp = clientSocket.remoteAddress.address;
 
-            // 📁 1. التعرف المباشر على استقبال الملفات مع استدعاء FileTransferService
-            if (message.startsWith("FILE_HEADER")) {
-              List<String> parts = message.split("|");
-              if (parts.length >= 3) {
-                String fileName = parts[1];
-                int fileSize = int.tryParse(parts[2]) ?? 0;
+              // 📁 1. التعرف المباشر على استقبال الملفات مع استدعاء FileTransferService
+              if (message.startsWith("FILE_HEADER")) {
+                List<String> parts = message.split("|");
+                if (parts.length >= 3) {
+                  String fileName = parts[1];
+                  int fileSize = int.tryParse(parts[2]) ?? 0;
 
-                await FileTransferService.receiveFile(
-                  clientSocket,
-                  fileName: fileName,
-                  fileSize: fileSize,
-                  onProgress: (progress) {
-                    print("جاري استقبال الملف: ${(progress * 100).toStringAsFixed(0)}%");
-                  },
-                );
+                  await FileTransferService.receiveFile(
+                    clientSocket,
+                    fileName: fileName,
+                    fileSize: fileSize,
+                    onProgress: (progress) {
+                      print("جاري استقبال الملف: ${(progress * 100).toStringAsFixed(0)}%");
+                    },
+                  );
+                }
+                return;
               }
-              return;
-            }
 
-            // 📞 2. طلبات الاتصال والمكالمات
-            if (message.startsWith("CONNECT_REQUEST")) {
-              List<String> parts = message.split("|");
-              String callerId = parts.length > 1 ? parts[1].trim() : remoteIp;
-              String originalName = parts.length > 2 ? parts[2].trim() : callerId;
+              // 📞 2. طلبات الاتصال والمكالمات
+              if (message.startsWith("CONNECT_REQUEST")) {
+                List<String> parts = message.split("|");
+                String callerId = parts.length > 1 ? parts[1].trim() : remoteIp;
+                String originalName = parts.length > 2 ? parts[2].trim() : callerId;
 
-              String? savedName = await ContactService.getContactName(callerId);
-              String displayName = (savedName != null && savedName.isNotEmpty)
-                  ? savedName
-                  : originalName;
+                String? savedName = await ContactService.getContactName(callerId);
+                String displayName = (savedName != null && savedName.isNotEmpty)
+                    ? savedName
+                    : originalName;
 
-              onRequestConnection(callerId, displayName, clientSocket);
-            } else if (message == "CONNECT_ACCEPTED") {
-              onMessageReceived(remoteIp, "CONNECT_ACCEPTED");
-              clientSocket.destroy();
-            } else {
-              String processedMsg = message;
-              try {
-                processedMsg = EncryptionService.decryptText(message);
-              } catch (_) {
+                onRequestConnection(callerId, displayName, clientSocket);
+              } else if (message == "CONNECT_ACCEPTED") {
+                onMessageReceived(remoteIp, "CONNECT_ACCEPTED");
+                clientSocket.destroy();
+              } else {
+                String processedMsg = message;
                 try {
-                  final decoded = jsonDecode(message);
-                  if (decoded is Map<String, dynamic> && decoded.containsKey('message')) {
-                    decoded['message'] = EncryptionService.decryptText(decoded['message']);
-                    processedMsg = jsonEncode(decoded);
-                  }
-                } catch (_) {}
-              }
+                  processedMsg = EncryptionService.decryptText(message);
+                } catch (_) {
+                  try {
+                    final decoded = jsonDecode(message);
+                    if (decoded is Map<String, dynamic> && decoded.containsKey('message')) {
+                      decoded['message'] = EncryptionService.decryptText(decoded['message']);
+                      processedMsg = jsonEncode(decoded);
+                    }
+                  } catch (_) {}
+                }
 
-              _messageStreamController.add(processedMsg);
-              onMessageReceived(remoteIp, processedMsg);
+                _messageStreamController.add(processedMsg);
+                onMessageReceived(remoteIp, processedMsg);
+                clientSocket.destroy();
+              }
+            },
+            onError: (error) {
               clientSocket.destroy();
-            }
-          },
-          onError: (error) {
-            clientSocket.destroy();
-          },
-          onDone: () {
-            clientSocket.destroy();
-          },
-        );
-      });
+            },
+            onDone: () {
+              clientSocket.destroy();
+            },
+          );
+        },
+        onError: (e) {
+          print("خطأ استماع السيرفر: $e");
+        },
+      );
+      return true;
     } catch (e) {
       print("خطأ أثناء تشغيل السيرفر: $e");
+      return false;
     }
   }
 
@@ -147,9 +182,16 @@ class P2PSocketServer {
     return await sendMessageToHost(host, port, "CONNECT_REQUEST|$myDeviceId|$myName");
   }
 
-  void stop() {
+  /// إغلاق السيرفر بأمان
+  Future<void> stopServer() async {
     stopRingtone();
-    _server?.close();
+    try {
+      await _server?.close();
+    } catch (_) {}
     _server = null;
+  }
+
+  void stop() {
+    stopServer();
   }
 }
