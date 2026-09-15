@@ -29,6 +29,7 @@ dependencies:
   flutter_local_notifications: ^17.0.0
   flutter_foreground_task: ^8.0.0
   wakelock_plus: ^1.2.0
+  web_socket_channel: ^3.0.0 # ⚡ المضافة لربط التطبيق بسيرفر اللابتوب
   
   # ⚡ حزمة التسجيل الأساسية
   record: 5.1.2
