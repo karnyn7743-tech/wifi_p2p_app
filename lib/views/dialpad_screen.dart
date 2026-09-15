@@ -1,4 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:web_socket_channel/io.dart';
 import '../services/contact_service.dart';
 import '../services/network_discovery_service.dart';
 import 'chat_detail_screen.dart';
@@ -9,10 +12,10 @@ class DialpadScreen extends StatefulWidget {
   const DialpadScreen({Key? key, required this.activeDevices}) : super(key: key);
 
   @override
-  State<DialpadScreen> createState() => _DialpadScreenState(); // 🛠️ تم تصحيح ربط الـ State
+  State<DialpadScreen> createState() => _DialpadScreenState();
 }
 
-class _DialpadScreenState extends State<DialpadScreen> { // 🛠️ تم تعديل اسم الكلاس ليتطابق مع createState
+class _DialpadScreenState extends State<DialpadScreen> {
   String _enteredNumber = '';
 
   void _onKeyPress(String value) {
@@ -34,44 +37,61 @@ class _DialpadScreenState extends State<DialpadScreen> { // 🛠️ تم تعد�
   Future<void> _makeCall() async {
     if (_enteredNumber.isEmpty) return;
 
-    // 1. البحث عن الرقم اللاسلكي في الدفتر المحفوظ
+    // 1. البحث عن الرقم اللاسلكي في الدفتر المحفوظ محلياً
     ContactModel? contact = await ContactService.getContactByExtension(_enteredNumber);
 
-    if (contact == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('الرقم اللاسلكي $_enteredNumber غير مسجل في الدفتر')),
+    // 2. إذا وجد في جهات الاتصال، نبحث عن الجهاز في قائمة الأجهزة المتاحة P2P
+    if (contact != null) {
+      DiscoveredService? targetDevice;
+      try {
+        targetDevice = widget.activeDevices.firstWhere(
+          (device) => device.name == contact.deviceId || device.host == contact.deviceId,
         );
+      } catch (_) {}
+
+      if (targetDevice != null && targetDevice.host != null) {
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ChatDetailScreen(
+                targetDeviceId: contact.deviceId,
+                targetHost: targetDevice!.host!,
+                targetPort: targetDevice.port ?? 4040,
+              ),
+            ),
+          );
+        }
+        return;
       }
-      return;
     }
 
-    // 2. البحث عن الجهاز المسجل في قائمة الأجهزة المتصلة بالشبكة حالياً
-    DiscoveredService? targetDevice;
-    try {
-      targetDevice = widget.activeDevices.firstWhere(
-        (device) => device.name == contact.deviceId || device.host == contact.deviceId,
-      );
-    } catch (_) {}
+    // 3. إذا لم يوجد بجهة اتصال أو كان جهاز P2P غير مكتشف، نحاول الاتصال به عبر السيرفر المحلي (PBX Routing)
+    final prefs = await SharedPreferences.getInstance();
+    String? serverIp = prefs.getString('server_ip');
 
-    if (targetDevice != null && targetDevice.host != null) {
+    if (serverIp != null && serverIp.isNotEmpty) {
       if (mounted) {
+        // فتح شاشة التحدث المباشر مع تحويل الاتصال عبر السيرفر المركزي/المدمج
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => ChatDetailScreen(
-              targetDeviceId: contact.deviceId,
-              targetHost: targetDevice!.host!,
-              targetPort: targetDevice.port ?? 4040,
+              targetDeviceId: 'ext_$_enteredNumber',
+              targetHost: serverIp,
+              targetPort: 4040,
             ),
           ),
         );
       }
     } else {
       if (mounted) {
-        // 🛠️ تم تصحيح الخطأ واستبدال TextSnackBar بـ SnackBar القياسي
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('الجهاز (${contact.name}) غير متصل بالشبكة حالياً')),
+          SnackBar(
+            content: Text(contact != null
+                ? 'الجهاز (${contact.name}) غير متصل بالشبكة حالياً'
+                : 'الرقم الداخلي $_enteredNumber غير متصل بالسيرفر المحلي'),
+          ),
         );
       }
     }
