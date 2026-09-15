@@ -17,7 +17,7 @@ class ChatDetailScreen extends StatefulWidget {
   final int targetPort;
 
   const ChatDetailScreen({
-    key? key,
+    Key? key, // ⚡ تم تعديل حرف K ليكون Capital للـ Type
     required this.targetDeviceId,
     required this.targetHost,
     required this.targetPort,
