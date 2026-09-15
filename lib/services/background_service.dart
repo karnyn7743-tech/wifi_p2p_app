@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -7,6 +8,9 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:web_socket_channel/io.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'p2p_socket_server.dart';
 import 'contact_service.dart';
 
@@ -226,12 +230,19 @@ class BackgroundServiceHelper {
       },
     );
 
+    // ⚡ الاتصال بسيرفر اللابتوب المركزي (WebSocket) لإدارة الأرقام والمكالمات
+    IOWebSocketChannel? pbxChannel;
+    _connectToLaptopPBX().then((channel) {
+      pbxChannel = channel;
+    });
+
     // 🔄 فحص دوري حاسم كل 3 ثوانٍ لإغلاق الإشعار فور فصل الواي فاي
     Timer.periodic(const Duration(seconds: 3), (timer) async {
       bool isConnected = await isWifiActive();
       if (!isConnected) {
         timer.cancel();
         socketServer.stop();
+        pbxChannel?.sink.close();
         if (service is AndroidServiceInstance) {
           service.stopSelf();
         }
@@ -240,10 +251,56 @@ class BackgroundServiceHelper {
 
     service.on('stopService').listen((event) {
       socketServer.stop();
+      pbxChannel?.sink.close();
       if (service is AndroidServiceInstance) {
         service.stopSelf();
       }
     });
+  }
+
+  /// ⚡ دالة مساعدة للاتصال بسيرفر اللابتوب وتسجيل الجوال برقم داخلي
+  static Future<IOWebSocketChannel?> _connectToLaptopPBX() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? serverIp = prefs.getString('server_ip');
+      if (serverIp == null || serverIp.isEmpty) return null;
+
+      final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
+      String deviceId = 'unknown_device';
+      if (Platform.isAndroid) {
+        final androidInfo = await deviceInfo.androidInfo;
+        deviceId = androidInfo.id;
+      } else if (Platform.isIOS) {
+        final iosInfo = await deviceInfo.iosInfo;
+        deviceId = iosInfo.identifierForVendor ?? 'ios_device';
+      }
+
+      final channel = IOWebSocketChannel.connect(Uri.parse('ws://$serverIp:8765'));
+
+      // إرسال طلب التسجيل
+      channel.sink.add(jsonEncode({
+        'type': 'REGISTER',
+        'device_id': deviceId,
+        'name': 'جوال محلي',
+      }));
+
+      // الاستماع للإشعارات الواردة من السيرفر
+      channel.stream.listen((message) async {
+        final data = jsonDecode(message);
+        if (data['type'] == 'INCOMING_CALL') {
+          String fromNumber = data['from_number'] ?? 'مجهول';
+          showNotification(
+            id: 202,
+            title: 'مكالمة واردة 📞',
+            body: 'اتصال من الرقم الداخلي: $fromNumber',
+          );
+        }
+      }, onError: (_) {}, onDone: () {});
+
+      return channel;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// إظهار إشعار منبثق علوي
