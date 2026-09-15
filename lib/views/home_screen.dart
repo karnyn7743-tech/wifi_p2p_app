@@ -12,6 +12,7 @@ import '../services/contact_service.dart';
 import '../services/audio_helper.dart';
 import '../services/background_service.dart';
 import '../services/group_service.dart';
+import '../services/embedded_server.dart'; // ⚡ تم إضافة ملف السيرفر المحلي
 import 'chat_detail_screen.dart';
 import 'group_chat_screen.dart';
 import 'dialpad_screen.dart';
@@ -38,11 +39,15 @@ class _HomeScreenState extends State<HomeScreen> {
   final int localPort = 4040;
   List<String> _myLocalIps = [];
 
-  // ⚡ متغيرة الاتصال بسيرفر اللابتوب PBX
+  // ⚡ متغيرات الاتصال والسيرفر الداخلي PBX
   final TextEditingController _serverIpController = TextEditingController();
   IOWebSocketChannel? _pbxChannel;
   String _myExtensionNumber = "غير متصل";
   bool _isConnectedToPbx = false;
+  
+  // ⚡ حالة السيرفر المدمج والـ IP المكتشف
+  bool _isServerRunning = false;
+  String _detectedIp = "جاري الفحص...";
 
   @override
   void initState() {
@@ -53,10 +58,43 @@ class _HomeScreenState extends State<HomeScreen> {
 
     BackgroundServiceHelper.isWifiActive().then((_) {
       _fetchMyLocalIps().then((_) {
+        _loadLocalIp();
         _initNetworkServices();
         _loadSavedServerIp(); // تحميل IP السيرفر المحفوظ والاتصال
       });
     });
+  }
+
+  /// جلب عنوان IP المحلي للجوال
+  Future<void> _loadLocalIp() async {
+    String ip = await EmbeddedPbxServer.getLocalIpAddress();
+    if (mounted) {
+      setState(() {
+        _detectedIp = ip;
+        if (_serverIpController.text.isEmpty) {
+          _serverIpController.text = ip;
+        }
+      });
+    }
+  }
+
+  /// تشغيل هذا الجوال كـ سيرفر (Host)
+  Future<void> _startHostServer() async {
+    bool success = await EmbeddedPbxServer.startServer(port: 8888);
+    if (success) {
+      setState(() {
+        _isServerRunning = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تم تشغيل السيرفر المحلي بنجاح على IP: $_detectedIp')),
+      );
+      // الاتصال التلقائي بالسيرفر المحلي للجوال نفسه
+      _connectToLaptopServer(_detectedIp);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('فشل تشغيل السيرفر المحلي، تأكد من إغلاق أي سيرفر آخر.')),
+      );
+    }
   }
 
   /// تحميل IP السيرفر المحفوظ مسبقاً والاتصال التلقائي
@@ -69,7 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// الاتصال بسيرفر اللابتوب عبر WebSocket
+  /// الاتصال بالسيرفر المحلي (سواء كان جوال مضيف أو لابتوب) عبر WebSocket
   Future<void> _connectToLaptopServer(String ip) async {
     if (ip.isEmpty) return;
 
@@ -92,20 +130,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // إرسال طلب التسجيل
       _pbxChannel!.sink.add(jsonEncode({
-        'type': 'REGISTER',
+        'type': 'register',
         'device_id': deviceId,
         'name': 'جوال محلي',
       }));
 
-      // الاستماع للردود من اللابتوب
+      // الاستماع للردود من السيرفر
       _pbxChannel!.stream.listen((message) {
         final data = jsonDecode(message);
         final type = data['type'];
 
-        if (type == 'REGISTER_RESPONSE' && data['status'] == 'SUCCESS') {
+        if (type == 'registered' || (type == 'REGISTER_RESPONSE' && data['status'] == 'SUCCESS')) {
           if (mounted) {
             setState(() {
-              _myExtensionNumber = data['phone_number'] ?? 'متصل';
+              _myExtensionNumber = data['ext'] ?? data['phone_number'] ?? 'متصل';
               _isConnectedToPbx = true;
             });
           }
@@ -121,12 +159,26 @@ class _HomeScreenState extends State<HomeScreen> {
         if (mounted) {
           setState(() {
             _isConnectedToPbx = false;
+            _myExtensionNumber = "غير متصل";
           });
         }
       });
     } catch (e) {
       print("خطأ الاتصال بالسيرفر: $e");
     }
+  }
+
+  /// قطع الاتصال وإيقاف السيرفر إن كان يعمل
+  void _disconnectPbx() {
+    _pbxChannel?.sink.close();
+    if (_isServerRunning) {
+      EmbeddedPbxServer.stopServer();
+      _isServerRunning = false;
+    }
+    setState(() {
+      _isConnectedToPbx = false;
+      _myExtensionNumber = "غير متصل";
+    });
   }
 
   Future<void> _fetchMyLocalIps() async {
@@ -168,7 +220,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     SoundHelper.stopRingtone();
                     Navigator.pop(ctx);
                     
-                    // إرسال إشارة رفض للمتصل وتدمير المقبس بأمان
                     try {
                       socket.write(jsonEncode({'type': 'CALL_REJECTED'}));
                     } catch (_) {}
@@ -181,12 +232,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     SoundHelper.stopRingtone();
                     Navigator.pop(ctx);
 
-                    // 1. إرسال موافقة للمتصل لبدء جلسة الصوت/الفيديو
                     try {
                       socket.write(jsonEncode({'type': 'CALL_ACCEPTED'}));
                     } catch (_) {}
 
-                    // 2. تدمير المقبس المباشر وتوجيه المستخدم لشاشة المحادثة/المكالمة
                     socket.destroy();
                     _openChatRoom(callerId, remoteAddress, localPort);
                   },
@@ -463,7 +512,7 @@ class _HomeScreenState extends State<HomeScreen> {
     SoundHelper.stopRingtone();
     _discoveryService.stop();
     _socketServer.stop();
-    _pbxChannel?.sink.close();
+    _disconnectPbx();
     _serverIpController.dispose();
     super.dispose();
   }
@@ -537,7 +586,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // ⚡ شريط الاتصال بالسيرفر الداخلي PBX
+          // ⚡ شريط إدخال IP والربط مع زر تشغيل المضيف (Host)
           Container(
             color: Colors.blue.shade100,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -547,7 +596,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: TextField(
                     controller: _serverIpController,
                     decoration: const InputDecoration(
-                      hintText: 'عنوان IP اللابتوب (مثلاً: 192.168.1.50)',
+                      hintText: 'عنوان IP السيرفر (192.168.X.X)',
                       isDense: true,
                       contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                       border: OutlineInputBorder(),
@@ -556,17 +605,34 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 ElevatedButton(
-                  onPressed: () => _connectToLaptopServer(_serverIpController.text.trim()),
-                  child: Text(_isConnectedToPbx ? 'متصل' : 'ربط'),
+                  onPressed: _isConnectedToPbx 
+                      ? _disconnectPbx 
+                      : () => _connectToLaptopServer(_serverIpController.text.trim()),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _isConnectedToPbx ? Colors.red : Colors.blue,
+                  ),
+                  child: Text(
+                    _isConnectedToPbx ? 'قطع' : 'ربط',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                IconButton(
+                  icon: Icon(
+                    _isServerRunning ? Icons.dns : Icons.dns_outlined,
+                    color: _isServerRunning ? Colors.green.shade800 : Colors.indigo,
+                  ),
+                  tooltip: _isServerRunning ? 'السيرفر المحلي يعمل' : 'تشغيل كـ سيرفر (Host)',
+                  onPressed: _isServerRunning ? null : _startHostServer,
                 ),
               ],
             ),
           ),
           Container(
             color: Colors.blue.shade50,
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(10),
             child: Row(
               children: [
                 Icon(
@@ -577,8 +643,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 Expanded(
                   child: Text(
                     _isConnectedToPbx 
-                        ? 'رقمك الداخلي: $_myExtensionNumber (متصل بالسيرفر المركزي)' 
-                        : 'متصل بالشبكة المحلية - أ enter IP اللابتوب للربط السريع',
+                        ? 'رقمك الداخلي: $_myExtensionNumber (متصل بالسيرفر المحلي)' 
+                        : 'عنوان IP هذا الجهاز: $_detectedIp ${_isServerRunning ? "🟢 (سيرفر)" : ""}',
                     style: TextStyle(
                       fontSize: 13, 
                       fontWeight: _isConnectedToPbx ? FontWeight.bold : FontWeight.normal,
