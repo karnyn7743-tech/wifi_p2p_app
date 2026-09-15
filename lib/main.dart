@@ -3,13 +3,15 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'services/background_service.dart';
 import 'services/license_service.dart';
+import 'services/p2p_socket_server.dart';
+import 'services/embedded_pbx_server.dart';
 import 'views/activation_view.dart';
 import 'views/home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // 1. طلب الأذونات المطلوبة بما فيها أذونات الخلفية والإشعارات
+  // 1. طلب الأذونات المطلوبة بما فيها أذونات الخلفية والإشعارات والأجهزة المجاورة
   await _requestPermissions();
 
   // 2. تهيئة خدمات الخلفية والإشعارات المحلية بالكامل
@@ -18,12 +20,26 @@ void main() async {
   // 3. التحقق من حالة تفعيل التطبيق للجهاز أولاً
   bool isActivated = await LicenseService.isAppActivated();
 
-  // 4. تشغيل خدمة الخلفية والإشعارات في حال كان التطبيق مفعّلاً
+  // 4. تشغيل السيرفرات وخدمة الخلفية في حال كان التطبيق مفعّلاً
   if (isActivated) {
-    await BackgroundServiceHelper.startService();
+    await _startAllServices();
   }
 
   runApp(WifiP2PApp(isActivated: isActivated));
+}
+
+/// تشغيل السيرفرات الداخلية وخدمة الخلفية
+Future<void> _startAllServices() async {
+  try {
+    // تشغيل سيرفر الـ Socket اللاسلكي المحلي
+    await P2PSocketServer.startServer();
+    
+    // تشغيل سيرفر التحويلات والمقسم المدمج PBX
+    await EmbeddedPbxServer.startServer();
+    
+    // تشغيل خدمة المهام في الخلفية والإشعارات
+    await BackgroundServiceHelper.startService();
+  } catch (_) {}
 }
 
 Future<void> _requestPermissions() async {
@@ -57,8 +73,8 @@ class _WifiP2PAppState extends State<WifiP2PApp> {
 
   /// دالة تفعيل التطبيق بعد إدخال الكود الصحيح
   void _handleActivation() async {
-    // ⚡ بدء خدمة الخلفية فور إتمام التفعيل بنجاح
-    await BackgroundServiceHelper.startService();
+    // ⚡ بدء تشغيل السيرفرات وخدمة الخلفية فور إتمام التفعيل بنجاح
+    await _startAllServices();
     if (mounted) {
       setState(() {
         _isActivated = true;
