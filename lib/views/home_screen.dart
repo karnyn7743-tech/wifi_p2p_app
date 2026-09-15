@@ -12,7 +12,7 @@ import '../services/contact_service.dart';
 import '../services/audio_helper.dart';
 import '../services/background_service.dart';
 import '../services/group_service.dart';
-import '../services/embedded_server.dart'; // ⚡ تم إضافة ملف السيرفر المحلي
+import '../services/embedded_pbx_server.dart'; // ⚡ تم إضافة ملف السيرفر المحلي
 import 'chat_detail_screen.dart';
 import 'group_chat_screen.dart';
 import 'dialpad_screen.dart';
