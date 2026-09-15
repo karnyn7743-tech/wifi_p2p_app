@@ -88,7 +88,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       _pbxChannel?.sink.close();
-      _pbxChannel = IOWebSocketChannel.connect(Uri.parse('ws://$ip:8765'));
+      _pbxChannel = IOWebSocketChannel.connect(Uri.parse('ws://$ip:8888'));
 
       // إرسال طلب التسجيل
       _pbxChannel!.sink.add(jsonEncode({
@@ -472,7 +472,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('المستكشف للاتصالات المحلية'),
+        title: const Text('المستكشف للاتصالات'),
         centerTitle: true,
         actions: [
           Padding(
