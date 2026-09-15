@@ -38,8 +38,8 @@ class ContactService {
     final prefs = await SharedPreferences.getInstance();
     List<ContactModel> contacts = await getAllContacts();
 
-    // حذف السجل القديم للجهاز إن وجد لمنع التكرار
-    contacts.removeWhere((c) => c.deviceId == cleanId);
+    // حذف السجل القديم للجهاز أو التحويلة لمنع التكرار
+    contacts.removeWhere((c) => c.deviceId == cleanId || (cleanExt.isNotEmpty && c.extension == cleanExt));
     contacts.add(ContactModel(deviceId: cleanId, name: cleanName, extension: cleanExt));
 
     List<String> rawList = contacts.map((c) => jsonEncode(c.toMap())).toList();
@@ -90,14 +90,16 @@ class ContactService {
     return resultMap;
   }
 
-  /// 4️⃣ جلب اسم جهة اتصال محددة بناءً على deviceId
-  static Future<String?> getContactName(String deviceId) async {
-    final cleanId = deviceId.trim();
-    if (cleanId.isEmpty) return null;
+  /// 4️⃣ جلب اسم جهة اتصال محددة بناءً على deviceId أو الرقم اللاسلكي
+  static Future<String?> getContactName(String deviceIdOrExt) async {
+    final cleanKey = deviceIdOrExt.trim();
+    if (cleanKey.isEmpty) return null;
 
     List<ContactModel> contacts = await getAllContacts();
     try {
-      final contact = contacts.firstWhere((c) => c.deviceId == cleanId);
+      final contact = contacts.firstWhere(
+        (c) => c.deviceId == cleanKey || (c.extension.isNotEmpty && c.extension == cleanKey),
+      );
       return contact.name;
     } catch (_) {
       return null;
