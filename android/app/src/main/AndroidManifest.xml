@@ -29,7 +29,7 @@
     <!-- أذونات الموقع والأجهزة القريبة -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" tools:targetApi="s" />
 
     <!-- أذونات خدمة الخلفية والإشعارات واستثناء البطارية -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
