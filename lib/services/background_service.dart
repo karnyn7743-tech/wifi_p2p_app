@@ -66,7 +66,7 @@ class BackgroundServiceHelper {
         channelId: 'p2p_call_channel',
         channelName: 'خدمة اتصالات P2P',
         channelDescription: 'إبقاء اتصال التطبيق نشطاً للاستقبال',
-        channelImportance: NotificationChannelImportance.MAX, // 🛠️ استخدام NotificationChannelImportance
+        channelImportance: NotificationChannelImportance.MAX,
         priority: NotificationPriority.MAX,
       ),
       iosNotificationOptions: const IOSNotificationOptions(
@@ -93,7 +93,7 @@ class BackgroundServiceHelper {
       notificationTitle: 'الاتصال اللاسلكي محلياً نشط',
       notificationText: 'التطبيق جاهز لاستقبال الاتصالات والرسائل الواردة',
       notificationIcon: const NotificationIcon(
-        metaDataName: 'ic_launcher', // 🛠️ استخدام metaDataName بدلاً من name
+        metaDataName: 'ic_launcher',
       ),
       callback: startForegroundTaskCallback,
     );
@@ -136,12 +136,12 @@ class BackgroundServiceHelper {
             AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(channel);
 
-    // 2. إعداد خدمة الخلفية (تعطيل isForegroundMode المباشر لمنع الإشعار الإجباري)
+    // 2. إعداد خدمة الخلفية
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: onStart,
         autoStart: false,
-        isForegroundMode: false, // 🛑 منع إظهار الإشعار عند بداية التهيئة تلقائياً
+        isForegroundMode: false, // منع إظهار الإشعار الإجباري تلقائياً بدون واي فاي
         notificationChannelId: 'p2p_call_channel',
         initialNotificationTitle: 'خدمة الاتصال المحلي تعمل',
         initialNotificationContent: 'جاري الاستماع للرسائل والمكالمات الواردة...',
@@ -160,7 +160,6 @@ class BackgroundServiceHelper {
 
   /// مراقبة حالة الواي فاي وتدقيق الاتصال لتشغيل أو إيقاف الخدمة والإشعار
   static void _setupWifiListener(FlutterBackgroundService service) {
-    // فحص فوري وقت التهيئة
     checkAndToggleService(service);
 
     Connectivity().onConnectivityChanged.listen((_) async {
@@ -174,11 +173,9 @@ class BackgroundServiceHelper {
     bool isRunning = await service.isRunning();
 
     if (hasWifi && !isRunning) {
-      // 🟢 يوجد واي فاي والخدمة متوقفة -> تشغيل الخدمة
       await service.startService();
-      await startService(); // تشغيل الوقاية المستمرة من النوم
+      await startService(); // تشغيل الوقاية المستمرة من خمول النظام
     } else if (!hasWifi && isRunning) {
-      // 🔴 مفصول عن الواي فاي والخدمة تعمل -> إيقاف الخدمة وإخفاء الإشعار
       service.invoke('stopService');
       await stopForegroundService();
     }
@@ -194,7 +191,7 @@ class BackgroundServiceHelper {
   static void onStart(ServiceInstance service) async {
     DartPluginRegistrant.ensureInitialized();
 
-    // ⚡ التأكد الفوري داخل الخيط: إن لم يوجد واي فاي نغلق الخدمة فوراً قبل إظهار أي إشعار
+    // التأكد الفوري داخل الخيط: إن لم يوجد واي فاي نغلق الخدمة فوراً
     bool active = await isWifiActive();
     if (!active) {
       if (service is AndroidServiceInstance) {
@@ -203,7 +200,6 @@ class BackgroundServiceHelper {
       return;
     }
 
-    // تحويل الخدمة لـ Foreground وإظهار الإشعار فقط بعد ثبوت وجود الواي فاي
     if (service is AndroidServiceInstance) {
       service.setAsForegroundService();
     }
@@ -230,13 +226,13 @@ class BackgroundServiceHelper {
       },
     );
 
-    // ⚡ الاتصال بسيرفر اللابتوب المركزي (WebSocket) لإدارة الأرقام والمكالمات
+    // ⚡ الاتصال بالسيرفر المحلي (المدمج أو اللابتوب) على المنفذ 8888
     IOWebSocketChannel? pbxChannel;
     _connectToLaptopPBX().then((channel) {
       pbxChannel = channel;
     });
 
-    // 🔄 فحص دوري حاسم كل 3 ثوانٍ لإغلاق الإشعار فور فصل الواي فاي
+    // 🔄 فحص دوري كل 3 ثوانٍ لإغلاق الخدمة فور فصل الواي فاي
     Timer.periodic(const Duration(seconds: 3), (timer) async {
       bool isConnected = await isWifiActive();
       if (!isConnected) {
@@ -258,7 +254,7 @@ class BackgroundServiceHelper {
     });
   }
 
-  /// ⚡ دالة مساعدة للاتصال بسيرفر اللابتوب وتسجيل الجوال برقم داخلي
+  /// ⚡ دالة الاتصال بالسيرفر المحلي المدمج / اللابتوب على المنفذ 8888
   static Future<IOWebSocketChannel?> _connectToLaptopPBX() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -275,20 +271,23 @@ class BackgroundServiceHelper {
         deviceId = iosInfo.identifierForVendor ?? 'ios_device';
       }
 
-      final channel = IOWebSocketChannel.connect(Uri.parse('ws://$serverIp:8765'));
+      // تم التحديث لاستخدام المنفذ 8888 المتوافق مع HomeScreen والسيرفر المدمج
+      final channel = IOWebSocketChannel.connect(Uri.parse('ws://$serverIp:8888'));
 
       // إرسال طلب التسجيل
       channel.sink.add(jsonEncode({
-        'type': 'REGISTER',
+        'type': 'register',
         'device_id': deviceId,
-        'name': 'جوال محلي',
+        'name': 'جوال محلي (خلفية)',
       }));
 
-      // الاستماع للإشعارات الواردة من السيرفر
+      // الاستماع للإشعارات والمكالمات الواردة من السيرفر
       channel.stream.listen((message) async {
         final data = jsonDecode(message);
-        if (data['type'] == 'INCOMING_CALL') {
-          String fromNumber = data['from_number'] ?? 'مجهول';
+        final type = data['type'];
+
+        if (type == 'INCOMING_CALL' || type == 'call_offer') {
+          String fromNumber = data['from_number'] ?? data['caller_ext'] ?? 'مجهول';
           showNotification(
             id: 202,
             title: 'مكالمة واردة 📞',
