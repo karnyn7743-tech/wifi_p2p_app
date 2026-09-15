@@ -11,7 +11,7 @@ import 'views/home_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // 1. طلب الأذونات المطلوبة
+  // 1. طلب الأذونات المطلوبة فور التشغيل
   await _requestPermissions();
 
   // 2. تهيئة خدمات الخلفية والإشعارات المحلية
@@ -20,7 +20,7 @@ void main() async {
   // 3. التحقق من حالة تفعيل التطبيق
   bool isActivated = await LicenseService.isAppActivated();
 
-  // 4. تشغيل السيرفرات وخدمة الخلفية عند التفعيل
+  // 4. تشغيل السيرفرات وخدمة الخلفية في حال كان التطبيق مفعّلاً
   if (isActivated) {
     await _startAllServices();
   }
@@ -28,10 +28,10 @@ void main() async {
   runApp(WifiP2PApp(isActivated: isActivated));
 }
 
-/// تشغيل السيرفرات الداخلية وخدمة الخلفية بأمان
+/// تشغيل السيرفرات الداخلية وخدمة الخلفية بأمان مستقل لكل خدمة
 Future<void> _startAllServices() async {
   try {
-    // ⚡ ملاحظة: تأكد من اسم الدالة في P2PSocketServer (إذا كانت start() أو startServer())
+    // تشغيل سيرفر السوكيت المحلي
     await P2PSocketServer.startServer();
   } catch (e) {
     debugPrint('Error starting P2PSocketServer: $e');
@@ -45,7 +45,7 @@ Future<void> _startAllServices() async {
   }
 
   try {
-    // تشغيل خدمة المهام في الخلفية والإشعارات
+    // تشغيل خدمة المهام في الخلفية
     await BackgroundServiceHelper.startService();
   } catch (e) {
     debugPrint('Error starting BackgroundService: $e');
