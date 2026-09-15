@@ -12,7 +12,7 @@ import '../services/contact_service.dart';
 import '../services/audio_helper.dart';
 import '../services/background_service.dart';
 import '../services/group_service.dart';
-import '../services/embedded_pbx_server.dart'; // ⚡ تم إضافة ملف السيرفر المحلي
+import '../services/embedded_pbx_server.dart';
 import 'chat_detail_screen.dart';
 import 'group_chat_screen.dart';
 import 'dialpad_screen.dart';
@@ -65,9 +65,9 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  /// جلب عنوان IP المحلي للجوال
+  /// جلب عنوان IP المحلي الحقيقي للجوال بتخطي الـ Loopback
   Future<void> _loadLocalIp() async {
-    String ip = await EmbeddedPbxServer.getLocalIpAddress();
+    String ip = await P2PSocketServer.getLocalIpAddress();
     if (mounted) {
       setState(() {
         _detectedIp = ip;
@@ -92,7 +92,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _connectToLaptopServer(_detectedIp);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('فشل تشغيل السيرفر المحلي، تأكد من إغلاق أي سيرفر آخر.')),
+        const SnackBar(content: Text('السيرفر يعمل بالفعل أو أن المنفذ مستخدم.')),
       );
     }
   }
@@ -197,7 +197,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// تهيئة خدمات الشبكة ومعالجة الاتصالات الواردة بشكل مباشر وآمن
+  /// تهيئة خدمات الشبكة ومعالجة الاتصالات الواردة عبر السوكيت المحلي
   Future<void> _initNetworkServices() async {
     await _socketServer.startServer(
       localPort,
@@ -293,7 +293,7 @@ class _HomeScreenState extends State<HomeScreen> {
               controller: nameController,
               decoration: const InputDecoration(
                 labelText: 'اسم الجهة',
-                hintText: 'مثال: المكتب الرئيسية',
+                hintText: 'مثال: المكتب الرئيسي',
                 icon: Icon(Icons.person),
               ),
             ),
