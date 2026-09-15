@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:web_socket_channel/io.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 import '../services/identity_service.dart';
 import '../services/network_discovery_service.dart';
 import '../services/p2p_socket_server.dart';
@@ -34,6 +38,12 @@ class _HomeScreenState extends State<HomeScreen> {
   final int localPort = 4040;
   List<String> _myLocalIps = [];
 
+  // ⚡ متغيرة الاتصال بسيرفر اللابتوب PBX
+  final TextEditingController _serverIpController = TextEditingController();
+  IOWebSocketChannel? _pbxChannel;
+  String _myExtensionNumber = "غير متصل";
+  bool _isConnectedToPbx = false;
+
   @override
   void initState() {
     super.initState();
@@ -44,8 +54,79 @@ class _HomeScreenState extends State<HomeScreen> {
     BackgroundServiceHelper.isWifiActive().then((_) {
       _fetchMyLocalIps().then((_) {
         _initNetworkServices();
+        _loadSavedServerIp(); // تحميل IP السيرفر المحفوظ والاتصال
       });
     });
+  }
+
+  /// تحميل IP السيرفر المحفوظ مسبقاً والاتصال التلقائي
+  Future<void> _loadSavedServerIp() async {
+    final prefs = await SharedPreferences.getInstance();
+    String? savedIp = prefs.getString('server_ip');
+    if (savedIp != null && savedIp.isNotEmpty) {
+      _serverIpController.text = savedIp;
+      _connectToLaptopServer(savedIp);
+    }
+  }
+
+  /// الاتصال بسيرفر اللابتوب عبر WebSocket
+  Future<void> _connectToLaptopServer(String ip) async {
+    if (ip.isEmpty) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('server_ip', ip);
+
+      final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
+      String deviceId = 'unknown_device';
+      if (Platform.isAndroid) {
+        final androidInfo = await deviceInfo.androidInfo;
+        deviceId = androidInfo.id;
+      } else if (Platform.isIOS) {
+        final iosInfo = await deviceInfo.iosInfo;
+        deviceId = iosInfo.identifierForVendor ?? 'ios_device';
+      }
+
+      _pbxChannel?.sink.close();
+      _pbxChannel = IOWebSocketChannel.connect(Uri.parse('ws://$ip:8765'));
+
+      // إرسال طلب التسجيل
+      _pbxChannel!.sink.add(jsonEncode({
+        'type': 'REGISTER',
+        'device_id': deviceId,
+        'name': 'جوال محلي',
+      }));
+
+      // الاستماع للردود من اللابتوب
+      _pbxChannel!.stream.listen((message) {
+        final data = jsonDecode(message);
+        final type = data['type'];
+
+        if (type == 'REGISTER_RESPONSE' && data['status'] == 'SUCCESS') {
+          if (mounted) {
+            setState(() {
+              _myExtensionNumber = data['phone_number'] ?? 'متصل';
+              _isConnectedToPbx = true;
+            });
+          }
+        }
+      }, onError: (_) {
+        if (mounted) {
+          setState(() {
+            _isConnectedToPbx = false;
+            _myExtensionNumber = "خطأ بالاتصال";
+          });
+        }
+      }, onDone: () {
+        if (mounted) {
+          setState(() {
+            _isConnectedToPbx = false;
+          });
+        }
+      });
+    } catch (e) {
+      print("خطأ الاتصال بالسيرفر: $e");
+    }
   }
 
   Future<void> _fetchMyLocalIps() async {
@@ -382,6 +463,8 @@ class _HomeScreenState extends State<HomeScreen> {
     SoundHelper.stopRingtone();
     _discoveryService.stop();
     _socketServer.stop();
+    _pbxChannel?.sink.close();
+    _serverIpController.dispose();
     super.dispose();
   }
 
@@ -454,17 +537,53 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
+          // ⚡ شريط الاتصال بالسيرفر الداخلي PBX
+          Container(
+            color: Colors.blue.shade100,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _serverIpController,
+                    decoration: const InputDecoration(
+                      hintText: 'عنوان IP اللابتوب (مثلاً: 192.168.1.50)',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      border: OutlineInputBorder(),
+                      fillColor: Colors.white,
+                      filled: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: () => _connectToLaptopServer(_serverIpController.text.trim()),
+                  child: Text(_isConnectedToPbx ? 'متصل' : 'ربط'),
+                ),
+              ],
+            ),
+          ),
           Container(
             color: Colors.blue.shade50,
             padding: const EdgeInsets.all(12),
-            child: const Row(
+            child: Row(
               children: [
-                Icon(Icons.wifi, color: Colors.blue),
-                SizedBox(width: 8),
+                Icon(
+                  _isConnectedToPbx ? Icons.check_circle : Icons.wifi,
+                  color: _isConnectedToPbx ? Colors.green : Colors.blue,
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'متصل بالشبكة المحلية - جميع الأجهزة متصلة وموثوقة تلقائياً',
-                    style: TextStyle(fontSize: 12),
+                    _isConnectedToPbx 
+                        ? 'رقمك الداخلي: $_myExtensionNumber (متصل بالسيرفر المركزي)' 
+                        : 'متصل بالشبكة المحلية - أ enter IP اللابتوب للربط السريع',
+                    style: TextStyle(
+                      fontSize: 13, 
+                      fontWeight: _isConnectedToPbx ? FontWeight.bold : FontWeight.normal,
+                      color: _isConnectedToPbx ? Colors.green.shade900 : Colors.black,
+                    ),
                   ),
                 ),
               ],
