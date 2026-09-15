@@ -21,7 +21,7 @@ class ChatDetailScreen extends StatefulWidget {
     required this.targetDeviceId,
     required this.targetHost,
     required this.targetPort,
-  }) : super(key: key);
+  }) : super(Key: key);
 
   @override
   State<ChatDetailScreen> createState() => _ChatDetailScreenState();
@@ -45,7 +45,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   @override
   void initState() {
     super.initState();
-    _displayName = widget.targetDeviceId;
+    
+    // التعامل مع الأرقام الداخليّة المقدمة من السيرفر المدمج
+    if (widget.targetDeviceId.startsWith('ext_')) {
+      _displayExtension = widget.targetDeviceId.replaceFirst('ext_', '');
+      _displayName = 'رقم داخلي: $_displayExtension';
+    } else {
+      _displayName = widget.targetDeviceId;
+    }
+    
     _loadSavedContactName();
 
     _messageSubscription = P2PSocketServer.messageStream.listen((data) {
@@ -57,12 +65,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     List<ContactModel> allContacts = await ContactService.getAllContacts();
     try {
       final contact = allContacts.firstWhere(
-        (c) => c.deviceId.trim() == widget.targetDeviceId.trim(),
+        (c) => c.deviceId.trim() == widget.targetDeviceId.trim() ||
+               c.extension.trim() == _displayExtension.trim(),
       );
       if (mounted) {
         setState(() {
           if (contact.name.isNotEmpty) _displayName = contact.name;
-          _displayExtension = contact.extension;
+          if (contact.extension.isNotEmpty) _displayExtension = contact.extension;
         });
       }
     } catch (_) {}
@@ -77,28 +86,30 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       if (decoded is Map<String, dynamic> && decoded.containsKey('type')) {
         String type = decoded['type'];
 
-        if (type == 'offer') {
+        if (type == 'offer' || type == 'call_offer') {
           P2PSocketServer.playRingtone(loop: true);
           _showIncomingCallDialog(
             isVideo: decoded['isVideo'] ?? false,
-            sdp: decoded['sdp'],
+            sdp: decoded['sdp'] ?? '',
           );
           return;
-        } else if (type == 'answer') {
+        } else if (type == 'answer' || type == 'call_answer') {
           P2PSocketServer.stopRingtone();
-          await _webrtcService.handleAnswer(decoded['sdp']);
+          if (decoded.containsKey('sdp')) {
+            await _webrtcService.handleAnswer(decoded['sdp']);
+          }
           if (mounted) setState(() {});
           return;
-        } else if (type == 'candidate') {
-          await _webrtcService.handleCandidate(decoded['candidate']);
+        } else if (type == 'candidate' || type == 'ice_candidate') {
+          if (decoded.containsKey('candidate')) {
+            await _webrtcService.handleCandidate(decoded['candidate']);
+          }
           return;
         } else if (type == 'hangup' || type == 'CALL_REJECTED') {
-          // إلغاء الاتصال فور الرفض أو إنهاء المكالمة
           P2PSocketServer.stopRingtone();
           await _cleanCallSession();
           return;
         } else if (type == 'CALL_ACCEPTED') {
-          // استكمال عملية الربط فور موافقة الطرف المستقبل
           P2PSocketServer.stopRingtone();
           if (mounted) setState(() {});
           return;
@@ -165,7 +176,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 P2PSocketServer.stopRingtone();
                 Navigator.of(context).pop();
                 
-                // 1. إعادة تهيئة الجلسة لضمان استجابة الصوت/الفيديو
                 await _webrtcService.dispose();
 
                 setState(() {
@@ -173,7 +183,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   _isVideoCall = isVideo;
                 });
 
-                // 2. إتمام المصافحة بإنشاء الـ Answer
                 await _webrtcService.handleOfferAndAnswer(
                   sdp,
                   widget.targetHost,
@@ -195,7 +204,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     List<ContactModel> allContacts = await ContactService.getAllContacts();
     try {
       existingContact = allContacts.firstWhere(
-        (c) => c.deviceId.trim() == widget.targetDeviceId.trim(),
+        (c) => c.deviceId.trim() == widget.targetDeviceId.trim() ||
+               (_displayExtension.isNotEmpty && c.extension.trim() == _displayExtension.trim()),
       );
     } catch (_) {}
 
@@ -217,7 +227,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'المعرف (ID): ${widget.targetDeviceId}',
+              'المعرف: ${widget.targetDeviceId}',
               style: const TextStyle(color: Colors.grey, fontSize: 14),
             ),
             const SizedBox(height: 12),
@@ -266,7 +276,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
-  /// 📞 التكيف مع تكرار وإعادة إجراء الاتصال بشكل سليم دون تعليق
   void _startCall({required bool isVideo}) async {
     await _cleanCallSession();
 
