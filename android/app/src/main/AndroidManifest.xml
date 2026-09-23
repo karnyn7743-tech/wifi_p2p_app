@@ -15,13 +15,24 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
-    <!-- أذونات المكالمات والوسائط (WebRTC وتسجيل الصوت للمجموعات) -->
+    <!-- 🎙️ أذونات الصوت والمكالمات ومنع الصدى والتشويش (WebRTC Audio Processing & AEC) -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <uses-permission android:name="android.permission.VIBRATE" /> <!-- ⚡ للهزاز أثناء الرنين -->
+    <uses-permission android:name="android.permission.VIBRATE" /> <!-- للهزاز أثناء الرنين -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
 
-    <!-- أذونات البلوتوث للسماعات اللاسلكية -->
+    <!-- 🔐 أذونات المصادقة البيومترية والبصمة -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
+
+    <!-- 📞 أذونات شاشة القفل والمكالمات الواردة التلقائية (CallKit / Fullscreen Incoming Calls) -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
+
+    <!-- أذونات البلوتوث للسماعات اللاسلكية ومنع الارتداد الصوتي عبر سماعات الرأس -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
@@ -34,14 +45,16 @@
     <!-- أذونات خدمة الخلفية والإشعارات واستثناء البطارية -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" /> <!-- ⚡ لضمان عمل الصوت في الخلفية -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" /> <!-- ⚡ لمنع خمول التطبيق في الخلفية -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- تحديد الميزات الهاردويرية المطلوبة -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="true" />
+    <uses-feature android:name="android.hardware.fingerprint" android:required="false" />
 
     <application
         android:label="wifi_p2p_app"
@@ -75,13 +88,14 @@
         <!-- ⚡ خدمة التشغيل المستمر في الخلفية الخاصة بـ flutter_foreground_task -->
         <service 
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
-            android:foregroundServiceType="connectedDevice|microphone"
-            android:exported="false" />
+            android:foregroundServiceType="connectedDevice|microphone|phoneCall"
+            android:exported="false"
+            tools:replace="android:foregroundServiceType" />
 
         <!-- تعريف خدمة الخلفية الشاملة للاتصال والصوت -->
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
-            android:foregroundServiceType="connectedDevice|microphone"
+            android:foregroundServiceType="connectedDevice|microphone|phoneCall"
             android:exported="true"
             tools:replace="android:exported,android:foregroundServiceType" />
 
