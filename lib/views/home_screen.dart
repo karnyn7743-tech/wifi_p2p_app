@@ -16,6 +16,7 @@ import '../services/group_service.dart';
 import '../services/embedded_pbx_server.dart';
 import '../services/phone_number_service.dart'; // ⚡ تم استيراد خدمة توليد الرقم المكون من 5 أرقام
 import '../services/biometric_service.dart'; // 🔐 استيراد خدمة قفل البصمة
+import '../services/callkit_service.dart'; // 📞 استيراد خدمة شاشة قفل المكالمات
 import 'chat_detail_screen.dart';
 import 'group_chat_screen.dart';
 import 'dialpad_screen.dart';
@@ -316,6 +317,14 @@ class _HomeScreenState extends State<HomeScreen> {
         String displayName = await ContactService.getContactName(callerId) ?? callerName;
         String remoteAddress = socket.remoteAddress.address;
 
+        // 📞 إظهار شاشة الاتصال بنمط الهاتف حتى وإن كانت الشاشة مقفلة
+        await CallKitService.showIncomingCall(
+          uuid: callerId,
+          callerName: displayName,
+          callerNumber: remoteAddress,
+          isVideo: false,
+        );
+
         if (mounted) {
           showDialog(
             context: context,
@@ -326,6 +335,7 @@ class _HomeScreenState extends State<HomeScreen> {
               actions: [
                 TextButton(
                   onPressed: () {
+                    CallKitService.endAllCalls();
                     SoundHelper.stopRingtone();
                     Navigator.pop(ctx);
                     
@@ -338,6 +348,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 ElevatedButton(
                   onPressed: () {
+                    CallKitService.endAllCalls();
                     SoundHelper.stopRingtone();
                     Navigator.pop(ctx);
 
@@ -690,6 +701,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    CallKitService.endAllCalls();
     SoundHelper.stopRingtone();
     _discoveryService.stop();
     _socketServer.stop();
