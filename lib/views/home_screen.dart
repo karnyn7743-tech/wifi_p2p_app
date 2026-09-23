@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:qr_flutter/qr_flutter.dart'; // ⚡ تم استيراد حزمة رمز الـ QR
 import '../services/identity_service.dart';
 import '../services/network_discovery_service.dart';
 import '../services/p2p_socket_server.dart';
@@ -289,6 +290,76 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  /// ⚡ نافذة عرض رمز الاستجابة السريعة (QR Code) للاقتران المباشر
+  void _showQrCodeDialog() {
+    final Map<String, dynamic> qrPayload = {
+      'type': 'LANPHONE_PAIR',
+      'ip': _detectedIp,
+      'port': localPort,
+      'phone': _my5DigitNumber,
+      'name': 'جهاز محلي',
+    };
+
+    final String qrData = jsonEncode(qrPayload);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Center(
+          child: Text(
+            'رمز الاقتران المباشر (QR)',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+          ),
+        ),
+        content: Column(
+          mainAxisSize: minAxisSize(),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 8,
+                  ),
+                ],
+              ),
+              child: QrImageView(
+                data: qrData,
+                version: QrVersions.auto,
+                size: 210.0,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'الرقم اللاسلكي: $_my5DigitNumber',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.indigo,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'IP: $_detectedIp:$localPort',
+              style: const TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          Center(
+            child: TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إغلاق', style: TextStyle(fontSize: 16)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showSaveContactDialog(String deviceId, {String currentName = '', String currentExt = ''}) {
     final nameController = TextEditingController(text: currentName);
     final extController = TextEditingController(text: currentExt);
@@ -453,7 +524,7 @@ class _HomeScreenState extends State<HomeScreen> {
           return AlertDialog(
             title: const Text('إنشاء مجموعة جديدة'),
             content: Column(
-              mainAxisSize: MainAxisSize.min,
+              mainAxisSize: minAxisSize(),
               children: [
                 TextField(
                   controller: groupNameController,
@@ -537,6 +608,21 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('المستكشف للاتصالات'),
         centerTitle: true,
         actions: [
+          // ⚡ زر عرض رمز الاقتران QR
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Colors.purple,
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.qr_code, color: Colors.white, size: 22),
+                tooltip: 'عرض رمز الاقتران (QR)',
+                onPressed: _showQrCodeDialog,
+              ),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
             child: Container(
@@ -656,7 +742,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
+                    mainAxisSize: minAxisSize(),
                     children: [
                       Text(
                         _isConnectedToPbx 
@@ -778,7 +864,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             title: Text('$displayName (موثوق)'),
                             subtitle: Text('$targetIp:${deviceData['port']}'),
                             trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
+                              mainAxisSize: minAxisSize(),
                               children: [
                                 IconButton(
                                   icon: const Icon(Icons.bookmark_add, color: Colors.orange),
