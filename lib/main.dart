@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart'; // 📞 استيراد أحداث CallKit
 import 'services/background_service.dart';
 import 'services/license_service.dart';
 import 'services/p2p_socket_server.dart';
 import 'services/embedded_pbx_server.dart';
 import 'services/biometric_service.dart'; // 🔐 استيراد خدمة قفل البصمة
+import 'services/callkit_service.dart'; // 📞 استيراد خدمة المكالمات
 import 'views/activation_view.dart';
 import 'views/home_screen.dart';
 
@@ -95,6 +97,29 @@ class _WifiP2PAppState extends State<WifiP2PApp> {
     super.initState();
     _isActivated = widget.isActivated;
     _checkBiometricLock();
+    _listenToCallEvents(); // 📞 الاستماع لأحداث شاشة قفل المكالمات
+  }
+
+  /// 📞 الاستماع لأزرار شاشة القفل (رد / رفض)
+  void _listenToCallEvents() {
+    FlutterCallkitIncoming.onEvent.listen((event) {
+      if (event == null) return;
+      switch (event.event) {
+        case Event.actionCallAccept:
+          debugPrint('تم قبول المكالمة من شاشة القفل');
+          CallKitService.endAllCalls();
+          break;
+        case Event.actionCallDecline:
+          debugPrint('تم رفض المكالمة من شاشة القفل');
+          CallKitService.endAllCalls();
+          break;
+        case Event.actionCallEnded:
+          CallKitService.endAllCalls();
+          break;
+        default:
+          break;
+      }
+    });
   }
 
   /// 🔐 فحص ما إذا كان قفل البصمة مفعلاً والتحقق منه
