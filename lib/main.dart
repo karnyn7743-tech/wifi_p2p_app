@@ -100,19 +100,20 @@ class _WifiP2PAppState extends State<WifiP2PApp> {
     _listenToCallEvents(); // 📞 الاستماع لأحداث شاشة قفل المكالمات
   }
 
-  /// 📞 الاستماع لأزرار شاشة القفل (رد / رفض) باستخدام if / else لتفادي خطأ Constant Expression
+  /// 📞 الاستماع لأزرار شاشة القفل عبر فحص نص الحدث لتجنب أخطاء تعريف الكلاسات
   void _listenToCallEvents() {
     FlutterCallkitIncoming.onEvent.listen((event) {
       if (event == null) return;
-      
-      final eventType = event.event;
-      if (eventType == Event.actionCallAccept) {
+
+      final eventName = event.event.toString();
+
+      if (eventName.contains('ACTION_CALL_ACCEPT') || eventName.contains('actionCallAccept')) {
         debugPrint('تم قبول المكالمة من شاشة القفل');
         CallKitService.endAllCalls();
-      } else if (eventType == Event.actionCallDecline) {
+      } else if (eventName.contains('ACTION_CALL_DECLINE') || eventName.contains('actionCallDecline')) {
         debugPrint('تم رفض المكالمة من شاشة القفل');
         CallKitService.endAllCalls();
-      } else if (eventType == Event.actionCallEnded) {
+      } else if (eventName.contains('ACTION_CALL_ENDED') || eventName.contains('actionCallEnded')) {
         CallKitService.endAllCalls();
       }
     });
