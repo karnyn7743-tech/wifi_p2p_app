@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:record/record.dart'; // 🎙️ حزمة تسجيل الصوت
+import 'package:audioplayers/audioplayers.dart'; // 🔊 حزمة تشغيل الصوت
+import 'package:path_provider/path_provider.dart';
 import '../services/p2p_socket_server.dart';
 import '../services/webrtc_service.dart';
 import '../services/contact_service.dart';
@@ -17,7 +20,7 @@ class ChatDetailScreen extends StatefulWidget {
   final int targetPort;
 
   const ChatDetailScreen({
-    Key? key, // ⚡ تم تعديل حرف K ليكون Capital للـ Type
+    Key? key,
     required this.targetDeviceId,
     required this.targetHost,
     required this.targetPort,
@@ -42,9 +45,28 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   double _uploadProgress = 0.0;
   bool _isUploading = false;
 
+  // 🎙️ أدوات الرسائل الصوتية
+  late final AudioRecorder _audioRecorder;
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  bool _isRecording = false;
+  int _recordDuration = 0;
+  Timer? _recordTimer;
+  String? _currentlyPlayingPath;
+  bool _isPlayingAudio = false;
+
   @override
   void initState() {
     super.initState();
+    _audioRecorder = AudioRecorder();
+
+    _audioPlayer.onPlayerComplete.listen((_) {
+      if (mounted) {
+        setState(() {
+          _isPlayingAudio = false;
+          _currentlyPlayingPath = null;
+        });
+      }
+    });
     
     // التعامل مع الأرقام الداخليّة المقدمة من السيرفر المدمج
     if (widget.targetDeviceId.startsWith('ext_')) {
@@ -127,6 +149,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           _messages.add({
             'sender': _displayName,
             'text': decryptedText,
+            'type': decryptedText.startsWith('VOICE_NOTE:') ? 'voice' : 'text',
           });
         });
       }
@@ -298,7 +321,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (text.isEmpty) return;
 
     setState(() {
-      _messages.add({'sender': 'me', 'text': text});
+      _messages.add({'sender': 'me', 'text': text, 'type': 'text'});
     });
 
     _msgController.clear();
@@ -310,6 +333,127 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       widget.targetPort,
       encryptedText,
     );
+  }
+
+  // 🎙️ بدء تسجيل الصوت
+  Future<void> _startRecording() async {
+    try {
+      if (await _audioRecorder.hasPermission()) {
+        final directory = await getTemporaryDirectory();
+        final filePath = '${directory.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+        await _audioRecorder.start(
+          const RecordConfig(encoder: AudioEncoder.aacLc),
+          path: filePath,
+        );
+
+        setState(() {
+          _isRecording = true;
+          _recordDuration = 0;
+        });
+
+        _recordTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+          if (mounted) {
+            setState(() {
+              _recordDuration++;
+            });
+          }
+        });
+      }
+    } catch (e) {
+      print("خطأ بدء التسجيل: $e");
+    }
+  }
+
+  // 🛑 إيقاف التسجيل وإرساله فوراً عبر P2P
+  Future<void> _stopAndSendRecording() async {
+    _recordTimer?.cancel();
+    try {
+      final path = await _audioRecorder.stop();
+      setState(() {
+        _isRecording = false;
+      });
+
+      if (path != null && File(path).existsSync()) {
+        File voiceFile = File(path);
+        String fileName = path.split('/').last;
+
+        setState(() {
+          _isUploading = true;
+          _uploadProgress = 0.0;
+        });
+
+        bool success = await FileTransferService.sendFile(
+          targetHost: widget.targetHost,
+          targetPort: widget.targetPort,
+          file: voiceFile,
+          onProgress: (progress) {
+            if (mounted) {
+              setState(() {
+                _uploadProgress = progress;
+              });
+            }
+          },
+        );
+
+        if (mounted) {
+          setState(() {
+            _isUploading = false;
+          });
+
+          if (success) {
+            // إشعار المستلم بأن الملف المستلم هو رسالة صوتية
+            String voiceMarker = "VOICE_NOTE:$fileName";
+            String encryptedMarker = EncryptionService.encryptText(voiceMarker);
+            await P2PSocketServer.sendMessageToHost(
+              widget.targetHost,
+              widget.targetPort,
+              encryptedMarker,
+            );
+
+            setState(() {
+              _messages.add({
+                'sender': 'me',
+                'text': path,
+                'type': 'voice',
+              });
+            });
+          }
+        }
+      }
+    } catch (e) {
+      print("خطأ إيقاف التسجيل: $e");
+    }
+  }
+
+  // ❌ إلغاء التسجيل دون إرسال
+  Future<void> _cancelRecording() async {
+    _recordTimer?.cancel();
+    await _audioRecorder.stop();
+    setState(() {
+      _isRecording = false;
+      _recordDuration = 0;
+    });
+  }
+
+  // 🔊 تشغيل/إيقاف التسجيل الصوتي
+  Future<void> _toggleAudioPlay(String path) async {
+    if (_isPlayingAudio && _currentlyPlayingPath == path) {
+      await _audioPlayer.stop();
+      setState(() {
+        _isPlayingAudio = false;
+        _currentlyPlayingPath = null;
+      });
+    } else {
+      await _audioPlayer.stop();
+      if (File(path).existsSync()) {
+        await _audioPlayer.play(DeviceFileSource(path));
+        setState(() {
+          _isPlayingAudio = true;
+          _currentlyPlayingPath = path;
+        });
+      }
+    }
   }
 
   Future<void> _pickAndSendFile() async {
@@ -347,6 +491,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             _messages.add({
               'sender': 'me',
               'text': '📁 تم إرسال الملف: $fileName',
+              'type': 'text',
             });
           });
           ScaffoldMessenger.of(context).showSnackBar(
@@ -363,6 +508,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   @override
   void dispose() {
+    _recordTimer?.cancel();
+    _audioRecorder.dispose();
+    _audioPlayer.dispose();
     _messageSubscription?.cancel();
     P2PSocketServer.stopRingtone();
     _webrtcService.dispose();
@@ -410,6 +558,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   itemBuilder: (context, index) {
                     final msg = _messages[index];
                     final isMe = msg['sender'] == 'me';
+                    final isVoice = msg['type'] == 'voice';
 
                     return Align(
                       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -417,13 +566,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         margin: const EdgeInsets.symmetric(vertical: 4),
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         decoration: BoxDecoration(
-                          color: isMe ? Colors.blue.shade200 : Colors.grey.shade200,
+                          color: isMe ? Colors.blue.shade100 : Colors.grey.shade200,
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Text(
-                          msg['text'] ?? '',
-                          style: const TextStyle(fontSize: 16, color: Colors.black87),
-                        ),
+                        child: isVoice
+                            ? _buildVoiceBubble(msg['text'] ?? '', isMe)
+                            : Text(
+                                msg['text'] ?? '',
+                                style: const TextStyle(fontSize: 16, color: Colors.black87),
+                              ),
                       ),
                     );
                   },
@@ -452,29 +603,66 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           ],
                         ),
                       ),
-                    Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.attach_file, color: Colors.blue),
-                          tooltip: 'إرفاق ملف',
-                          onPressed: _isUploading ? null : _pickAndSendFile,
+                    // 🎙️ واجهة التسجيل عند التفعيل أو حقل الإدخال العادي
+                    if (_isRecording)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(color: Colors.red.shade200),
                         ),
-                        Expanded(
-                          child: TextField(
-                            controller: _msgController,
-                            decoration: const InputDecoration(
-                              hintText: 'اكتب رسالتك هنا...',
-                              border: OutlineInputBorder(),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.fiber_manual_record, color: Colors.red),
+                            const SizedBox(width: 8),
+                            Text(
+                              "جاري التسجيل: ${_recordDuration}s",
+                              style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                            ),
+                            const Spacer(),
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.grey),
+                              onPressed: _cancelRecording,
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.send, color: Colors.green),
+                              onPressed: _stopAndSendRecording,
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.attach_file, color: Colors.blue),
+                            tooltip: 'إرفاق ملف',
+                            onPressed: _isUploading ? null : _pickAndSendFile,
+                          ),
+                          Expanded(
+                            child: TextField(
+                              controller: _msgController,
+                              decoration: const InputDecoration(
+                                hintText: 'اكتب رسالتك هنا...',
+                                border: OutlineInputBorder(),
+                                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          icon: const Icon(Icons.send, color: Colors.blue),
-                          onPressed: _sendMessage,
-                        ),
-                      ],
-                    ),
+                          const SizedBox(width: 4),
+                          // زر الميكروفون للرسائل الصوتية
+                          IconButton(
+                            icon: const Icon(Icons.mic, color: Colors.teal),
+                            tooltip: 'تسجيل رسالة صوتية',
+                            onPressed: _startRecording,
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.send, color: Colors.blue),
+                            onPressed: _sendMessage,
+                          ),
+                        ],
+                      ),
                   ],
                 ),
               ),
@@ -483,6 +671,33 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           if (_inCall) _buildFullCallOverlay(),
         ],
       ),
+    );
+  }
+
+  // 🎙️ بناء فقاعة الرسالة الصوتية
+  Widget _buildVoiceBubble(String path, bool isMe) {
+    bool isCurrentPlaying = _isPlayingAudio && _currentlyPlayingPath == path;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: Icon(
+            isCurrentPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+            size: 32,
+            color: isMe ? Colors.blue.shade800 : Colors.indigo,
+          ),
+          onPressed: () => _toggleAudioPlay(path),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          isCurrentPlaying ? "جاري التشغيل..." : "رسالة صوتية 🎙️",
+          style: TextStyle(
+            color: isMe ? Colors.blue.shade900 : Colors.black87,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
     );
   }
 
