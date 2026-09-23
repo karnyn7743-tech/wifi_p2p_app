@@ -18,6 +18,7 @@ import '../services/phone_number_service.dart'; // ⚡ تم استيراد خد�
 import 'chat_detail_screen.dart';
 import 'group_chat_screen.dart';
 import 'dialpad_screen.dart';
+import 'qr_scanner_screen.dart'; // ⚡ تم استيراد شاشة ماسح رمز الاقتران
 import 'package:permission_handler/permission_handler.dart';
 
 Future<void> disableBatteryOptimization() async {
@@ -472,7 +473,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           title: Text(contact.name),
                           subtitle: Text('معرف: ${contact.deviceId}$extText'),
                           trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
+                            mainAxisSize: minAxisSize(),
                             children: [
                               IconButton(
                                 icon: const Icon(Icons.edit, color: Colors.blue),
@@ -620,6 +621,26 @@ class _HomeScreenState extends State<HomeScreen> {
                 icon: const Icon(Icons.qr_code, color: Colors.white, size: 22),
                 tooltip: 'عرض رمز الاقتران (QR)',
                 onPressed: _showQrCodeDialog,
+              ),
+            ),
+          ),
+          // ⚡ زر مسح رمز QR بالكاميرا
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Colors.teal,
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.qr_code_scanner, color: Colors.white, size: 22),
+                tooltip: 'مسح رمز QR للاقتران',
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const QrScannerScreen()),
+                  );
+                },
               ),
             ),
           ),
