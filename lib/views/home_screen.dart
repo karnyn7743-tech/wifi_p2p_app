@@ -15,6 +15,7 @@ import '../services/background_service.dart';
 import '../services/group_service.dart';
 import '../services/embedded_pbx_server.dart';
 import '../services/phone_number_service.dart'; // ⚡ تم استيراد خدمة توليد الرقم المكون من 5 أرقام
+import '../services/biometric_service.dart'; // 🔐 استيراد خدمة قفل البصمة
 import 'chat_detail_screen.dart';
 import 'group_chat_screen.dart';
 import 'dialpad_screen.dart';
@@ -48,10 +49,11 @@ class _HomeScreenState extends State<HomeScreen> {
   String _myExtensionNumber = "غير متصل";
   bool _isConnectedToPbx = false;
   
-  // ⚡ حالة السيرفر المدمج والـ IP المكتشف والرقم الفريد
+  // ⚡ حالة السيرفر المدمج والـ IP المكتشف والرقم الفريد وقفل البصمة
   bool _isServerRunning = false;
   String _detectedIp = "جاري الفحص...";
   String _my5DigitNumber = "-----"; // ⚡ حفظ الرقم الفريد المكون من 5 أرقام
+  bool _isBiometricEnabled = false; // 🔐 حالة تفعيل قفل البصمة
 
   @override
   void initState() {
@@ -59,6 +61,15 @@ class _HomeScreenState extends State<HomeScreen> {
     disableBatteryOptimization();
 
     BackgroundServiceHelper.startService();
+
+    // 🔐 التحقق من حالة تفعيل قفل البصمة
+    BiometricService.isBiometricEnabled().then((val) {
+      if (mounted) {
+        setState(() {
+          _isBiometricEnabled = val;
+        });
+      }
+    });
 
     // ⚡ جلب وتعيين الرقم اللاسلكي الفريد المكون من 5 أرقام
     PhoneNumberService.getOrGeneratePhoneNumber().then((num) {
@@ -76,6 +87,34 @@ class _HomeScreenState extends State<HomeScreen> {
         _loadSavedServerIp(); // تحميل IP السيرفر المحفوظ والاتصال
       });
     });
+  }
+
+  /// 🔐 دالة تفعيل/إلغاء قفل البصمة مع التحقق الأمني
+  Future<void> _toggleBiometricLock(bool value) async {
+    bool canAuth = await BiometricService.canCheckBiometrics();
+    if (!canAuth) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('جهازك لا يدعم المصادقة البيومترية أو لم يتم ضبط بصمة للنظام')),
+        );
+      }
+      return;
+    }
+
+    bool success = await BiometricService.authenticate();
+    if (success) {
+      await BiometricService.setBiometricEnabled(value);
+      if (mounted) {
+        setState(() {
+          _isBiometricEnabled = value;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(value ? 'تم تفعيل قفل البصمة بنجاح' : 'تم إلغاء قفل البصمة'),
+          ),
+        );
+      }
+    }
   }
 
   /// جلب عنوان IP المحلي الحقيقي للجوال بتخطي الـ Loopback
@@ -161,7 +200,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('تم تشغيل السيرفر المحلي بنجاح على IP: $_detectedIp')),
       );
-      // الاتصال التلقائي بالسيرفر المحلي للجوال نفسه
       _connectToLaptopServer(_detectedIp);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -201,14 +239,12 @@ class _HomeScreenState extends State<HomeScreen> {
       _pbxChannel?.sink.close();
       _pbxChannel = IOWebSocketChannel.connect(Uri.parse('ws://$ip:8888'));
 
-      // إرسال طلب التسجيل
       _pbxChannel!.sink.add(jsonEncode({
         'type': 'register',
         'device_id': deviceId,
         'name': 'جوال محلي',
       }));
 
-      // الاستماع للردود من السيرفر
       _pbxChannel!.stream.listen((message) {
         final data = jsonDecode(message);
         final type = data['type'];
@@ -669,6 +705,25 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('المستكشف للاتصالات'),
         centerTitle: true,
         actions: [
+          // 🔐 زر تفعيل/إلغاء قفل البصمة
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Container(
+              decoration: BoxDecoration(
+                color: _isBiometricEnabled ? Colors.teal.shade700 : Colors.grey.shade600,
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                icon: Icon(
+                  _isBiometricEnabled ? Icons.fingerprint : Icons.fingerprint_outlined,
+                  color: Colors.white,
+                  size: 22,
+                ),
+                tooltip: _isBiometricEnabled ? 'قفل البصمة مفعّل (اضغط للتعطيل)' : 'تفعيل قفل البصمة',
+                onPressed: () => _toggleBiometricLock(!_isBiometricEnabled),
+              ),
+            ),
+          ),
           // ⚡ زر عرض رمز الاقتران QR
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
@@ -836,7 +891,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       const SizedBox(height: 3),
-                      // ⚡ جعل الرقم قابلاً للضغط لفتح نافذة التعديل
                       InkWell(
                         onTap: _showChangePhoneNumberDialog,
                         borderRadius: BorderRadius.circular(4),
