@@ -13,6 +13,7 @@ import '../services/audio_helper.dart';
 import '../services/background_service.dart';
 import '../services/group_service.dart';
 import '../services/embedded_pbx_server.dart';
+import '../services/phone_number_service.dart'; // ⚡ تم استيراد خدمة توليد الرقم المكون من 5 أرقام
 import 'chat_detail_screen.dart';
 import 'group_chat_screen.dart';
 import 'dialpad_screen.dart';
@@ -45,9 +46,10 @@ class _HomeScreenState extends State<HomeScreen> {
   String _myExtensionNumber = "غير متصل";
   bool _isConnectedToPbx = false;
   
-  // ⚡ حالة السيرفر المدمج والـ IP المكتشف
+  // ⚡ حالة السيرفر المدمج والـ IP المكتشف والرقم الفريد
   bool _isServerRunning = false;
   String _detectedIp = "جاري الفحص...";
+  String _my5DigitNumber = "-----"; // ⚡ حفظ الرقم الفريد المكون من 5 أرقام
 
   @override
   void initState() {
@@ -55,6 +57,15 @@ class _HomeScreenState extends State<HomeScreen> {
     disableBatteryOptimization();
 
     BackgroundServiceHelper.startService();
+
+    // ⚡ جلب وتعيين الرقم اللاسلكي الفريد المكون من 5 أرقام
+    PhoneNumberService.getOrGeneratePhoneNumber().then((num) {
+      if (mounted) {
+        setState(() {
+          _my5DigitNumber = num;
+        });
+      }
+    });
 
     BackgroundServiceHelper.isWifiActive().then((_) {
       _fetchMyLocalIps().then((_) {
@@ -287,7 +298,7 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('حفظ جهة اتصال'),
         content: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize: minAxisSize(),
           children: [
             TextField(
               controller: nameController,
@@ -335,6 +346,8 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+  MainAxisSize minAxisSize() => MainAxisSize.min;
 
   void _showSavedContactsBottomSheet() {
     showModalBottomSheet(
@@ -641,15 +654,30 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    _isConnectedToPbx 
-                        ? 'رقمك الداخلي: $_myExtensionNumber (متصل بالسيرفر المحلي)' 
-                        : 'عنوان IP هذا الجهاز: $_detectedIp ${_isServerRunning ? "🟢 (سيرفر)" : ""}',
-                    style: TextStyle(
-                      fontSize: 13, 
-                      fontWeight: _isConnectedToPbx ? FontWeight.bold : FontWeight.normal,
-                      color: _isConnectedToPbx ? Colors.green.shade900 : Colors.black,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _isConnectedToPbx 
+                            ? 'رقمك الداخلي: $_myExtensionNumber (متصل بالسيرفر المحلي)' 
+                            : 'عنوان IP هذا الجهاز: $_detectedIp ${_isServerRunning ? "🟢 (سيرفر)" : ""}',
+                        style: TextStyle(
+                          fontSize: 13, 
+                          fontWeight: _isConnectedToPbx ? FontWeight.bold : FontWeight.normal,
+                          color: _isConnectedToPbx ? Colors.green.shade900 : Colors.black,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'رقم هاتفك اللاسلكي: $_my5DigitNumber', // ⚡ عرض الرقم الفريد المكون من 5 أرقام
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.indigo,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
