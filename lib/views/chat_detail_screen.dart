@@ -13,6 +13,7 @@ import '../services/webrtc_service.dart';
 import '../services/contact_service.dart';
 import '../services/encryption_service.dart';
 import '../services/file_transfer_service.dart';
+import '../services/chat_storage_service.dart'; // 💾 خدمة التخزين المحلي للرسائل
 
 class ChatDetailScreen extends StatefulWidget {
   final String targetDeviceId;
@@ -34,6 +35,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final TextEditingController _msgController = TextEditingController();
   final List<Map<String, String>> _messages = [];
   final WebRTCService _webrtcService = WebRTCService();
+  final ScrollController _scrollController = ScrollController();
   
   StreamSubscription<String>? _messageSubscription;
 
@@ -77,9 +79,34 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
     
     _loadSavedContactName();
+    _loadChatHistory(); // 💾 استرجاع الرسائل المحفوظة مسبقاً
 
     _messageSubscription = P2PSocketServer.messageStream.listen((data) {
       _handleIncomingData(data);
+    });
+  }
+
+  /// 💾 تحميل السجل المخزن محلياً
+  Future<void> _loadChatHistory() async {
+    final history = await ChatStorageService.getMessages(widget.targetDeviceId);
+    if (mounted) {
+      setState(() {
+        _messages.clear();
+        _messages.addAll(history);
+      });
+      _scrollToBottom();
+    }
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
@@ -108,7 +135,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       if (decoded is Map<String, dynamic> && decoded.containsKey('type')) {
         String type = decoded['type'];
 
-        if (type == 'offer' || type == 'call_offer') {
+        // إيصال استلام وقراءة الرسالة (✓✓)
+        if (type == 'ACK_DELIVERED') {
+          String? msgId = decoded['msgId'];
+          if (msgId != null) {
+            setState(() {
+              for (var msg in _messages) {
+                if (msg['id'] == msgId) {
+                  msg['status'] = 'read';
+                }
+              }
+            });
+          }
+          return;
+        } else if (type == 'offer' || type == 'call_offer') {
           P2PSocketServer.playRingtone(loop: true);
           _showIncomingCallDialog(
             isVideo: decoded['isVideo'] ?? false,
@@ -142,21 +182,44 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (rawData != "CONNECT_ACCEPTED" && rawData.isNotEmpty) {
       String decryptedText = EncryptionService.decryptText(rawData);
 
+      // استخراج معرّف الرسالة إن وجد لإرسال إيصال الاستلام
+      String incomingMsg = decryptedText;
+      String incomingId = DateTime.now().millisecondsSinceEpoch.toString();
+
+      if (decryptedText.startsWith("MSG|")) {
+        final parts = decryptedText.split("|");
+        if (parts.length >= 3) {
+          incomingId = parts[1];
+          incomingMsg = parts.sublist(2).join("|");
+        }
+      }
+
+      // إرسال إيصال الاستلام للطرف الآخر
+      final ackPayload = jsonEncode({'type': 'ACK_DELIVERED', 'msgId': incomingId});
+      P2PSocketServer.sendMessageToHost(widget.targetHost, widget.targetPort, ackPayload);
+
       P2PSocketServer.playRingtone(loop: false);
+
+      final newMsg = {
+        'id': incomingId,
+        'sender': _displayName,
+        'text': incomingMsg,
+        'type': incomingMsg.startsWith('VOICE_NOTE:') ? 'voice' : 'text',
+        'status': 'read',
+        'time': "${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}",
+      };
+
+      await ChatStorageService.saveMessage(widget.targetDeviceId, newMsg);
 
       if (mounted) {
         setState(() {
-          _messages.add({
-            'sender': _displayName,
-            'text': decryptedText,
-            'type': decryptedText.startsWith('VOICE_NOTE:') ? 'voice' : 'text',
-          });
+          _messages.add(newMsg);
         });
+        _scrollToBottom();
       }
     }
   }
 
-  /// تنظيف آمن وشامل لجلسة الاتصال السابقة لإتاحة إعادة الاتصال بسهولة
   Future<void> _cleanCallSession() async {
     P2PSocketServer.stopRingtone();
     await _webrtcService.dispose();
@@ -320,19 +383,42 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final text = _msgController.text.trim();
     if (text.isEmpty) return;
 
+    final String msgId = DateTime.now().millisecondsSinceEpoch.toString();
+    final String timeStr = "${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}";
+
+    final newMsg = {
+      'id': msgId,
+      'sender': 'me',
+      'text': text,
+      'type': 'text',
+      'status': 'sent', // تبدأ بعلامة صح واحدة
+      'time': timeStr,
+    };
+
     setState(() {
-      _messages.add({'sender': 'me', 'text': text, 'type': 'text'});
+      _messages.add(newMsg);
     });
 
     _msgController.clear();
+    _scrollToBottom();
 
-    String encryptedText = EncryptionService.encryptText(text);
+    await ChatStorageService.saveMessage(widget.targetDeviceId, newMsg);
 
-    await P2PSocketServer.sendMessageToHost(
+    // إرسال الرسالة مع معرف فريد ليتمكن المستلم من رد إيصال الاستلام
+    String payload = "MSG|$msgId|$text";
+    String encryptedText = EncryptionService.encryptText(payload);
+
+    bool delivered = await P2PSocketServer.sendMessageToHost(
       widget.targetHost,
       widget.targetPort,
       encryptedText,
     );
+
+    if (delivered && mounted) {
+      setState(() {
+        newMsg['status'] = 'delivered'; // تم التسليم للشبكة بنجاح
+      });
+    }
   }
 
   // 🎙️ بدء تسجيل الصوت
@@ -402,7 +488,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           });
 
           if (success) {
-            // إشعار المستلم بأن الملف المستلم هو رسالة صوتية
             String voiceMarker = "VOICE_NOTE:$fileName";
             String encryptedMarker = EncryptionService.encryptText(voiceMarker);
             await P2PSocketServer.sendMessageToHost(
@@ -411,13 +496,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               encryptedMarker,
             );
 
+            final newMsg = {
+              'id': DateTime.now().millisecondsSinceEpoch.toString(),
+              'sender': 'me',
+              'text': path,
+              'type': 'voice',
+              'status': 'read',
+              'time': "${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}",
+            };
+
+            await ChatStorageService.saveMessage(widget.targetDeviceId, newMsg);
+
             setState(() {
-              _messages.add({
-                'sender': 'me',
-                'text': path,
-                'type': 'voice',
-              });
+              _messages.add(newMsg);
             });
+            _scrollToBottom();
           }
         }
       }
@@ -487,13 +580,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         });
 
         if (success) {
+          final newMsg = {
+            'id': DateTime.now().millisecondsSinceEpoch.toString(),
+            'sender': 'me',
+            'text': '📁 تم إرسال الملف: $fileName',
+            'type': 'text',
+            'status': 'read',
+            'time': "${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}",
+          };
+
+          await ChatStorageService.saveMessage(widget.targetDeviceId, newMsg);
+
           setState(() {
-            _messages.add({
-              'sender': 'me',
-              'text': '📁 تم إرسال الملف: $fileName',
-              'type': 'text',
-            });
+            _messages.add(newMsg);
           });
+          _scrollToBottom();
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('تم إرسال الملف بنجاح!')),
           );
@@ -514,6 +615,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _messageSubscription?.cancel();
     P2PSocketServer.stopRingtone();
     _webrtcService.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -534,6 +636,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.delete_sweep, color: Colors.white70),
+            tooltip: 'مسح سجل المحادثة',
+            onPressed: () async {
+              await ChatStorageService.clearChat(widget.targetDeviceId);
+              setState(() {
+                _messages.clear();
+              });
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.bookmark_add, color: Colors.orange),
             onPressed: _showSaveContactDialog,
           ),
@@ -553,12 +665,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             children: [
               Expanded(
                 child: ListView.builder(
+                  controller: _scrollController,
                   padding: const EdgeInsets.all(12),
                   itemCount: _messages.length,
                   itemBuilder: (context, index) {
                     final msg = _messages[index];
                     final isMe = msg['sender'] == 'me';
                     final isVoice = msg['type'] == 'voice';
+                    final status = msg['status'] ?? 'sent';
+                    final time = msg['time'] ?? '';
 
                     return Align(
                       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -569,12 +684,40 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           color: isMe ? Colors.blue.shade100 : Colors.grey.shade200,
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: isVoice
-                            ? _buildVoiceBubble(msg['text'] ?? '', isMe)
-                            : Text(
+                        child: Column(
+                          crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (isVoice)
+                              _buildVoiceBubble(msg['text'] ?? '', isMe)
+                            else
+                              Text(
                                 msg['text'] ?? '',
                                 style: const TextStyle(fontSize: 16, color: Colors.black87),
                               ),
+                            const SizedBox(height: 4),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (time.isNotEmpty)
+                                  Text(
+                                    time,
+                                    style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                                  ),
+                                if (isMe) ...[
+                                  const SizedBox(width: 4),
+                                  Icon(
+                                    status == 'read'
+                                        ? Icons.done_all
+                                        : (status == 'delivered' ? Icons.done_all : Icons.done),
+                                    size: 14,
+                                    color: status == 'read' ? Colors.blue : Colors.grey.shade600,
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     );
                   },
@@ -603,7 +746,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           ],
                         ),
                       ),
-                    // 🎙️ واجهة التسجيل عند التفعيل أو حقل الإدخال العادي
                     if (_isRecording)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -651,7 +793,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                             ),
                           ),
                           const SizedBox(width: 4),
-                          // زر الميكروفون للرسائل الصوتية
                           IconButton(
                             icon: const Icon(Icons.mic, color: Colors.teal),
                             tooltip: 'تسجيل رسالة صوتية',
