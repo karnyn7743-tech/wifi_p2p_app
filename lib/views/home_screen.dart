@@ -91,6 +91,66 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// ⚡ نافذة مخصصة لتعديل رقم الاتصال المكون من 5 أرقام يدوياً
+  void _showChangePhoneNumberDialog() {
+    final TextEditingController numberController = TextEditingController(text: _my5DigitNumber);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تغيير رقم الهاتف اللاسلكي'),
+        content: Column(
+          mainAxisSize: minAxisSize(),
+          children: [
+            const Text(
+              'أدخل رقماً جديداً مكوناً من 5 أرقام (من 10000 إلى 99999):',
+              style: TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: numberController,
+              keyboardType: TextInputType.number,
+              maxLength: 5,
+              decoration: const InputDecoration(
+                labelText: 'الرقم الجديد',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.dialpad),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إلغاء'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final newNum = numberController.text.trim();
+              if (newNum.length == 5 && int.tryParse(newNum) != null) {
+                await PhoneNumberService.setCustomPhoneNumber(newNum);
+                if (mounted) {
+                  setState(() {
+                    _my5DigitNumber = newNum;
+                  });
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('تم تحديث رقم الاتصال بنجاح')),
+                  );
+                }
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('يرجى إدخال 5 أرقام صحيحة')),
+                );
+              }
+            },
+            child: const Text('حفظ'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// تشغيل هذا الجوال كـ سيرفر (Host)
   Future<void> _startHostServer() async {
     bool success = await EmbeddedPbxServer.startServer(port: 8888);
@@ -775,13 +835,25 @@ class _HomeScreenState extends State<HomeScreen> {
                           color: _isConnectedToPbx ? Colors.green.shade900 : Colors.black,
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'رقم هاتفك اللاسلكي: $_my5DigitNumber', // ⚡ عرض الرقم الفريد المكون من 5 أرقام
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.indigo,
+                      const SizedBox(height: 3),
+                      // ⚡ جعل الرقم قابلاً للضغط لفتح نافذة التعديل
+                      InkWell(
+                        onTap: _showChangePhoneNumberDialog,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Row(
+                          mainAxisSize: minAxisSize(),
+                          children: [
+                            Text(
+                              'رقم هاتفك اللاسلكي: $_my5DigitNumber',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.indigo,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.edit, size: 14, color: Colors.indigo),
+                          ],
                         ),
                       ),
                     ],
