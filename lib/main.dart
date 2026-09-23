@@ -5,6 +5,7 @@ import 'services/background_service.dart';
 import 'services/license_service.dart';
 import 'services/p2p_socket_server.dart';
 import 'services/embedded_pbx_server.dart';
+import 'services/biometric_service.dart'; // 🔐 استيراد خدمة قفل البصمة
 import 'views/activation_view.dart';
 import 'views/home_screen.dart';
 
@@ -85,11 +86,45 @@ class WifiP2PApp extends StatefulWidget {
 
 class _WifiP2PAppState extends State<WifiP2PApp> {
   late bool _isActivated;
+  bool _isAuthenticated = false;
+  bool _requiresBiometrics = false;
+  bool _isCheckingAuth = true;
 
   @override
   void initState() {
     super.initState();
     _isActivated = widget.isActivated;
+    _checkBiometricLock();
+  }
+
+  /// 🔐 فحص ما إذا كان قفل البصمة مفعلاً والتحقق منه
+  Future<void> _checkBiometricLock() async {
+    bool enabled = await BiometricService.isBiometricEnabled();
+    if (enabled && _isActivated) {
+      if (mounted) {
+        setState(() {
+          _requiresBiometrics = true;
+          _isCheckingAuth = false;
+        });
+      }
+      _authenticateUser();
+    } else {
+      if (mounted) {
+        setState(() {
+          _isAuthenticated = true;
+          _isCheckingAuth = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _authenticateUser() async {
+    bool authenticated = await BiometricService.authenticate();
+    if (mounted) {
+      setState(() {
+        _isAuthenticated = authenticated;
+      });
+    }
   }
 
   void _handleActivation() async {
@@ -99,6 +134,7 @@ class _WifiP2PAppState extends State<WifiP2PApp> {
         _isActivated = true;
       });
     }
+    _checkBiometricLock();
   }
 
   @override
@@ -111,11 +147,47 @@ class _WifiP2PAppState extends State<WifiP2PApp> {
           primarySwatch: Colors.blue,
           useMaterial3: true,
         ),
-        home: _isActivated
-            ? const HomeScreen()
-            : ActivationView(
-                onActivated: _handleActivation,
+        home: !_isActivated
+            ? ActivationView(onActivated: _handleActivation)
+            : _isCheckingAuth
+                ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+                : (_requiresBiometrics && !_isAuthenticated)
+                    ? _buildLockScreen()
+                    : const HomeScreen(),
+      ),
+    );
+  }
+
+  /// 🔒 شاشة القفل عند تفعيل البصمة
+  Widget _buildLockScreen() {
+    return Scaffold(
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.fingerprint, size: 85, color: Colors.blue),
+              const SizedBox(height: 20),
+              const Text(
+                'التطبيق مقفل بالبصمة',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
+              const SizedBox(height: 8),
+              const Text(
+                'يرجى تأكيد هويتك للوصول إلى المحادثات والاتصالات',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey, fontSize: 14),
+              ),
+              const SizedBox(height: 28),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.lock_open),
+                label: const Text('إلغاء القفل'),
+                onPressed: _authenticateUser,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
