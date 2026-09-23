@@ -14,6 +14,7 @@ import '../services/contact_service.dart';
 import '../services/encryption_service.dart';
 import '../services/file_transfer_service.dart';
 import '../services/chat_storage_service.dart'; // 💾 خدمة التخزين المحلي للرسائل
+import '../services/block_service.dart'; // 🚫 خدمة حظر الأجهزة
 
 class ChatDetailScreen extends StatefulWidget {
   final String targetDeviceId;
@@ -43,6 +44,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   String _displayExtension = '';
   bool _inCall = false;
   bool _isVideoCall = false;
+  bool _isBlocked = false; // 🚫 حالة حظر الجهاز الحالي
 
   double _uploadProgress = 0.0;
   bool _isUploading = false;
@@ -79,11 +81,70 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
     
     _loadSavedContactName();
+    _checkBlockStatus(); // 🚫 التحقق من حالة الحظر
     _loadChatHistory(); // 💾 استرجاع الرسائل المحفوظة مسبقاً
 
     _messageSubscription = P2PSocketServer.messageStream.listen((data) {
       _handleIncomingData(data);
     });
+  }
+
+  /// 🚫 فحص ما إذا كان الجهاز محظوراً
+  Future<void> _checkBlockStatus() async {
+    bool blocked = await BlockService.isBlocked(widget.targetDeviceId) ||
+                   await BlockService.isBlocked(widget.targetHost);
+    if (mounted) {
+      setState(() {
+        _isBlocked = blocked;
+      });
+    }
+  }
+
+  /// 🚫 تبديل حالة الحظر
+  Future<void> _toggleBlockDevice() async {
+    if (_isBlocked) {
+      await BlockService.unblockDevice(widget.targetDeviceId);
+      await BlockService.unblockDevice(widget.targetHost);
+      setState(() {
+        _isBlocked = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم إلغاء حظر الجهاز بنجاح')),
+        );
+      }
+    } else {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('تأكيد الحظر'),
+          content: Text('هل أنت متأكد من حظر $_displayName؟ لن تتمكن من مراسلته أو تلقي مكالمات ورسائل منه.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await BlockService.blockDevice(widget.targetDeviceId);
+                await BlockService.blockDevice(widget.targetHost);
+                setState(() {
+                  _isBlocked = true;
+                });
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('تم حظر هذا الجهاز')),
+                  );
+                }
+              },
+              child: const Text('حظر', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   /// 💾 تحميل السجل المخزن محلياً
@@ -127,7 +188,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   void _handleIncomingData(String rawData) async {
-    if (!mounted) return;
+    if (!mounted || _isBlocked) return;
 
     try {
       final decoded = jsonDecode(rawData);
@@ -231,6 +292,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   void _showIncomingCallDialog({required bool isVideo, required String sdp}) {
+    if (_isBlocked) return;
     HapticFeedback.vibrate();
 
     showDialog(
@@ -363,6 +425,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   void _startCall({required bool isVideo}) async {
+    if (_isBlocked) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('لا يمكن الاتصال بجهاز محظور')),
+      );
+      return;
+    }
+
     await _cleanCallSession();
 
     setState(() {
@@ -380,6 +449,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   void _sendMessage() async {
+    if (_isBlocked) return;
+
     final text = _msgController.text.trim();
     if (text.isEmpty) return;
 
@@ -391,7 +462,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       'sender': 'me',
       'text': text,
       'type': 'text',
-      'status': 'sent', // تبدأ بعلامة صح واحدة
+      'status': 'sent',
       'time': timeStr,
     };
 
@@ -404,7 +475,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     await ChatStorageService.saveMessage(widget.targetDeviceId, newMsg);
 
-    // إرسال الرسالة مع معرف فريد ليتمكن المستلم من رد إيصال الاستلام
     String payload = "MSG|$msgId|$text";
     String encryptedText = EncryptionService.encryptText(payload);
 
@@ -416,13 +486,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     if (delivered && mounted) {
       setState(() {
-        newMsg['status'] = 'delivered'; // تم التسليم للشبكة بنجاح
+        newMsg['status'] = 'delivered';
       });
     }
   }
 
   // 🎙️ بدء تسجيل الصوت
   Future<void> _startRecording() async {
+    if (_isBlocked) return;
     try {
       if (await _audioRecorder.hasPermission()) {
         final directory = await getTemporaryDirectory();
@@ -550,6 +621,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _pickAndSendFile() async {
+    if (_isBlocked) return;
     FilePickerResult? result = await FilePicker.platform.pickFiles();
 
     if (result != null && result.files.single.path != null) {
@@ -635,6 +707,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           ],
         ),
         actions: [
+          // 🚫 زر حظر / إلغاء حظر الجهاز
+          IconButton(
+            icon: Icon(
+              _isBlocked ? Icons.block_flipped : Icons.block,
+              color: _isBlocked ? Colors.red : Colors.white70,
+            ),
+            tooltip: _isBlocked ? 'إلغاء حظر الجهاز' : 'حظر هذا الجهاز',
+            onPressed: _toggleBlockDevice,
+          ),
           IconButton(
             icon: const Icon(Icons.delete_sweep, color: Colors.white70),
             tooltip: 'مسح سجل المحادثة',
@@ -650,12 +731,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             onPressed: _showSaveContactDialog,
           ),
           IconButton(
-            icon: const Icon(Icons.phone, color: Colors.green),
-            onPressed: () => _startCall(isVideo: false),
+            icon: Icon(Icons.phone, color: _isBlocked ? Colors.grey : Colors.green),
+            onPressed: _isBlocked ? null : () => _startCall(isVideo: false),
           ),
           IconButton(
-            icon: const Icon(Icons.videocam, color: Colors.blue),
-            onPressed: () => _startCall(isVideo: true),
+            icon: Icon(Icons.videocam, color: _isBlocked ? Colors.grey : Colors.blue),
+            onPressed: _isBlocked ? null : () => _startCall(isVideo: true),
           ),
         ],
       ),
@@ -723,90 +804,108 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   },
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.all(8),
-                color: Colors.white,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_isUploading)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8.0, left: 8.0, right: 8.0),
-                        child: Row(
+              // 🚫 إظهار شريط تنبيه الحظر أو حقل المراسلة العادي
+              if (_isBlocked)
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  color: Colors.red.shade50,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: const [
+                      Icon(Icons.block, color: Colors.red, size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'تم حظر هذا الجهاز. قم بإلغاء الحظر لإرسال الرسائل والمكالمات.',
+                        style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  color: Colors.white,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_isUploading)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8.0, left: 8.0, right: 8.0),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: LinearProgressIndicator(
+                                  value: _uploadProgress,
+                                  backgroundColor: Colors.grey.shade300,
+                                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text("${(_uploadProgress * 100).toStringAsFixed(0)}%"),
+                            ],
+                          ),
+                        ),
+                      if (_isRecording)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(color: Colors.red.shade200),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.fiber_manual_record, color: Colors.red),
+                              const SizedBox(width: 8),
+                              Text(
+                                "جاري التسجيل: ${_recordDuration}s",
+                                style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                              ),
+                              const Spacer(),
+                              IconButton(
+                                icon: const Icon(Icons.delete, color: Colors.grey),
+                                onPressed: _cancelRecording,
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.send, color: Colors.green),
+                                onPressed: _stopAndSendRecording,
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        Row(
                           children: [
+                            IconButton(
+                              icon: const Icon(Icons.attach_file, color: Colors.blue),
+                              tooltip: 'إرفاق ملف',
+                              onPressed: _isUploading ? null : _pickAndSendFile,
+                            ),
                             Expanded(
-                              child: LinearProgressIndicator(
-                                value: _uploadProgress,
-                                backgroundColor: Colors.grey.shade300,
-                                valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+                              child: TextField(
+                                controller: _msgController,
+                                decoration: const InputDecoration(
+                                  hintText: 'اكتب رسالتك هنا...',
+                                  border: OutlineInputBorder(),
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                ),
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            Text("${(_uploadProgress * 100).toStringAsFixed(0)}%"),
-                          ],
-                        ),
-                      ),
-                    if (_isRecording)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.red.shade50,
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(color: Colors.red.shade200),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.fiber_manual_record, color: Colors.red),
-                            const SizedBox(width: 8),
-                            Text(
-                              "جاري التسجيل: ${_recordDuration}s",
-                              style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-                            ),
-                            const Spacer(),
+                            const SizedBox(width: 4),
                             IconButton(
-                              icon: const Icon(Icons.delete, color: Colors.grey),
-                              onPressed: _cancelRecording,
+                              icon: const Icon(Icons.mic, color: Colors.teal),
+                              tooltip: 'تسجيل رسالة صوتية',
+                              onPressed: _startRecording,
                             ),
                             IconButton(
-                              icon: const Icon(Icons.send, color: Colors.green),
-                              onPressed: _stopAndSendRecording,
+                              icon: const Icon(Icons.send, color: Colors.blue),
+                              onPressed: _sendMessage,
                             ),
                           ],
                         ),
-                      )
-                    else
-                      Row(
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.attach_file, color: Colors.blue),
-                            tooltip: 'إرفاق ملف',
-                            onPressed: _isUploading ? null : _pickAndSendFile,
-                          ),
-                          Expanded(
-                            child: TextField(
-                              controller: _msgController,
-                              decoration: const InputDecoration(
-                                hintText: 'اكتب رسالتك هنا...',
-                                border: OutlineInputBorder(),
-                                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          IconButton(
-                            icon: const Icon(Icons.mic, color: Colors.teal),
-                            tooltip: 'تسجيل رسالة صوتية',
-                            onPressed: _startRecording,
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.send, color: Colors.blue),
-                            onPressed: _sendMessage,
-                          ),
-                        ],
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
             ],
           ),
           if (_inCall) _buildFullCallOverlay(),
