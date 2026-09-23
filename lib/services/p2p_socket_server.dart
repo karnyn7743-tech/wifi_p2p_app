@@ -5,6 +5,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'encryption_service.dart'; // 🔐 استيراد خدمة التشفير
 import 'contact_service.dart';    // 📖 استيراد خدمة جهات الاتصال
 import 'file_transfer_service.dart'; // 📁 استيراد خدمة نقل الملفات
+import 'block_service.dart'; // 🚫 استيراد خدمة حظر الأجهزة
 
 class P2PSocketServer {
   ServerSocket? _server;
@@ -84,6 +85,12 @@ class P2PSocketServer {
               String message = utf8.decode(data, allowMalformed: true).trim();
               String remoteIp = clientSocket.remoteAddress.address;
 
+              // 🚫 فحص حظر الـ IP العام أولاً
+              if (await BlockService.isBlocked(remoteIp)) {
+                clientSocket.destroy();
+                return;
+              }
+
               // 📁 1. التعرف المباشر على استقبال الملفات مع استدعاء FileTransferService
               if (message.startsWith("FILE_HEADER")) {
                 List<String> parts = message.split("|");
@@ -108,6 +115,12 @@ class P2PSocketServer {
                 List<String> parts = message.split("|");
                 String callerId = parts.length > 1 ? parts[1].trim() : remoteIp;
                 String originalName = parts.length > 2 ? parts[2].trim() : callerId;
+
+                // 🚫 فحص ما إذا كان معرّف المتصل محظوراً
+                if (await BlockService.isBlocked(callerId)) {
+                  clientSocket.destroy();
+                  return;
+                }
 
                 String? savedName = await ContactService.getContactName(callerId);
                 String displayName = (savedName != null && savedName.isNotEmpty)
